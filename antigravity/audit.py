@@ -6,7 +6,7 @@ from antigravity.logging import get_logger
 logger = get_logger("audit_logger")
 
 class AuditLogger:
-    def __init__(self, log_file="/opt/cryptobot/audit.log"):
+    def __init__(self, log_file="audit.log"):
         self.enabled = settings.AUDIT_ENABLED
         self.log_file = log_file
 

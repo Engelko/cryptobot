@@ -3,9 +3,10 @@ import pandas as pd
 import plotly.graph_objects as go
 from sqlalchemy import create_engine
 import time
+from antigravity.config import settings
 
 # Database Connection
-db_path = "sqlite:////opt/cryptobot/data.db"
+db_path = settings.DATABASE_URL
 engine = create_engine(db_path)
 
 st.set_page_config(page_title="Antigravity Cockpit", layout="wide", page_icon="🚀")
