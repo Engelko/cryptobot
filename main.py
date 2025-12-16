@@ -7,13 +7,20 @@ from antigravity.strategies.macd import MACDStrategy
 from antigravity.strategies.rsi import RSIStrategy
 from antigravity.copilot import AICopilot
 from antigravity.execution import execution_manager
+from antigravity.websocket_client import BybitWebSocket
 
 logger = get_logger("main")
+
+# Global reference to keep the websocket client alive
+ws_client = None
 
 async def shutdown(signal, loop):
     """Cleanup tasks tied to the service's shutdown."""
     logger.info("system_shutdown_initiated", signal=signal.name)
     
+    if ws_client:
+        await ws_client.close()
+
     await strategy_engine.stop()
     await event_bus.stop()
     
@@ -47,6 +54,13 @@ async def main():
     copilot = AICopilot()
     await copilot.start() # Note: copilot needs start method defined or simply subscribes in init?
     # Checking copilot.py: it has async start/stop methods. Good.
+
+    # Start WebSocket Data Feed
+    global ws_client
+    ws_client = BybitWebSocket()
+    # Subscribe to 1-minute candles for BTCUSDT
+    # Note: connect() runs a loop, so we must run it as a task
+    asyncio.create_task(ws_client.connect(["kline.1.BTCUSDT"]))
 
     logger.info("system_online", engine="active", strategies=["MACD_Trend", "RSI_Reversion"])
 
