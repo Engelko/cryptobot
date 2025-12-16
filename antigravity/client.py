@@ -85,3 +85,18 @@ class BybitClient:
          endpoint = "/v5/market/time"
          res = await self._request("GET", endpoint)
          return int(res.get("timeSecond"))
+
+    async def get_wallet_balance(self, coin: str = "USDT") -> Dict[str, Any]:
+        """
+        Get Unified Account Wallet Balance.
+        """
+        endpoint = "/v5/account/wallet-balance"
+        params = {
+            "accountType": "UNIFIED",
+            "coin": coin
+        }
+        res = await self._request("GET", endpoint, params)
+        # Result structure: { "list": [ { "coin": [ ... ] } ] }
+        if res and "list" in res and len(res["list"]) > 0:
+             return res["list"][0]
+        return {}

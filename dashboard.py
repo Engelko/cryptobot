@@ -3,7 +3,9 @@ import pandas as pd
 import plotly.graph_objects as go
 from sqlalchemy import create_engine
 import time
+import asyncio
 from antigravity.config import settings
+from antigravity.client import BybitClient
 
 # Database Connection
 db_path = settings.DATABASE_URL
@@ -17,12 +19,45 @@ st.title("🚀 Project Antigravity: Mission Control")
 st.sidebar.header("Telemetry")
 auto_refresh = st.sidebar.checkbox("Auto Refresh (5s)", value=True)
 
+# Fetch Balance (Async wrapper)
+async def fetch_balance():
+    if not settings.BYBIT_API_KEY:
+        return None
+    client = BybitClient()
+    try:
+        return await client.get_wallet_balance()
+    except Exception as e:
+        return None
+    finally:
+        await client.close()
+
+# Display Balance in Sidebar
+try:
+    if settings.BYBIT_API_KEY:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        balance_data = loop.run_until_complete(fetch_balance())
+        loop.close()
+
+        if balance_data and "coin" in balance_data:
+            for coin_data in balance_data["coin"]:
+                if coin_data["coin"] == "USDT":
+                    st.sidebar.metric("Bybit Balance (USDT)", f"${float(coin_data.get('walletBalance', 0)):.2f}")
+                    break
+        else:
+            st.sidebar.warning("Could not fetch balance")
+    else:
+        st.sidebar.info("API Key missing (Paper Mode only)")
+except Exception as e:
+    st.sidebar.error(f"Balance Error: {e}")
+
+
 if auto_refresh:
     time.sleep(5)
     st.rerun()
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Market", "Portfolio (Sim)", "Signals", "AI", "System"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Market", "Portfolio (Sim)", "Signals", "AI", "System", "Help"])
 
 with tab1:
     st.subheader("Live Market Data (BTCUSDT)")
@@ -94,7 +129,39 @@ with tab5:
     st.subheader("System Health")
     st.json({
         "Status": "Online",
-        "Mode": "Simulation (Paper)",
+        "Mode": "Simulation (Paper)" if settings.SIMULATION_MODE else "Live Trading",
         "Risk Manager": "Active",
-        "Database": "Connected"
+        "Database": "Connected",
+        "Active Strategies": ["MACD_Trend", "RSI_Reversion"],
+        "Environment": settings.ENVIRONMENT
     })
+
+    st.subheader("Configuration (Read-only)")
+    st.text(f"Config Source: .env file")
+    st.text(f"Max Daily Loss: ${settings.MAX_DAILY_LOSS}")
+    st.text(f"Max Position Size: ${settings.MAX_POSITION_SIZE}")
+
+with tab6:
+    st.subheader("User Guide")
+    st.markdown("""
+    ### How to use Project Antigravity
+
+    **1. Architecture**
+    This application is an **automated trading engine**, not a manual terminal.
+    It runs autonomously based on the strategies defined in the code and configuration settings.
+
+    **2. Configuration**
+    All settings (API keys, Risk limits, Strategy parameters) are managed via the `.env` file in the project root.
+    To change settings:
+    1. Stop the application.
+    2. Edit `.env`.
+    3. Restart the application.
+
+    **3. Strategies**
+    Currently, **MACD** and **RSI** strategies are active by default for BTCUSDT.
+    They automatically generate signals based on market data.
+
+    **4. Control**
+    - **Dashboard**: Use this interface to monitor performance.
+    - **Trading**: The bot executes trades automatically. Manual intervention is done by stopping the bot or using the Exchange interface directly.
+    """)
