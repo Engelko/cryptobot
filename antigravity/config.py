@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # Trading Configuration
     TRADING_SYMBOLS: Union[List[str], str] = Field(default=["BTCUSDT"], description="List of symbols to trade")
+    ACTIVE_STRATEGIES: Union[List[str], str] = Field(default=["MACD_Trend", "RSI_Reversion"], description="List of active strategies")
 
     # System Configuration
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
@@ -55,6 +56,12 @@ class Settings(BaseSettings):
             except:
                 # Fallback: split by comma if not valid JSON
                 self.TRADING_SYMBOLS = [s.strip() for s in self.TRADING_SYMBOLS.split(",")]
+
+        if isinstance(self.ACTIVE_STRATEGIES, str):
+            try:
+                self.ACTIVE_STRATEGIES = json.loads(self.ACTIVE_STRATEGIES)
+            except:
+                self.ACTIVE_STRATEGIES = [s.strip() for s in self.ACTIVE_STRATEGIES.split(",")]
 
 # Global Settings Instance
 settings = Settings()

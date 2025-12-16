@@ -40,14 +40,17 @@ async def main():
     # Register Strategies
     from antigravity.config import settings
     symbols = settings.TRADING_SYMBOLS
+    active_strategies = settings.ACTIVE_STRATEGIES
 
-    # MACD Params: 12, 26, 9
-    macd = MACDStrategy(name="MACD_Trend", symbols=symbols)
-    strategy_engine.register_strategy(macd)
+    if "MACD_Trend" in active_strategies:
+        # MACD Params: 12, 26, 9
+        macd = MACDStrategy(name="MACD_Trend", symbols=symbols)
+        strategy_engine.register_strategy(macd)
     
-    # RSI Params: 14, 70, 30
-    rsi = RSIStrategy(name="RSI_Reversion", symbols=symbols)
-    strategy_engine.register_strategy(rsi)
+    if "RSI_Reversion" in active_strategies:
+        # RSI Params: 14, 70, 30
+        rsi = RSIStrategy(name="RSI_Reversion", symbols=symbols)
+        strategy_engine.register_strategy(rsi)
     
     # Initialize Engine & Event Bus
     event_bus.start()
@@ -67,7 +70,7 @@ async def main():
     # Note: connect() runs a loop, so we must run it as a task
     asyncio.create_task(ws_client.connect(topics))
 
-    logger.info("system_online", engine="active", strategies=["MACD_Trend", "RSI_Reversion"], symbols=symbols)
+    logger.info("system_online", engine="active", strategies=active_strategies, symbols=symbols)
 
     # Keep alive
     try:
