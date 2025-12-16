@@ -1,0 +1,29 @@
+services:
+  engine:
+    build: .
+    container_name: antigravity-engine
+    command: python main.py
+    volumes:
+      - ./data.db:/app/data.db
+      - ./audit.log:/app/audit.log
+      - ./.env:/app/.env
+    restart: unless-stopped
+    networks:
+      - antigravity-net
+
+  dashboard:
+    build: .
+    container_name: antigravity-dashboard
+    command: streamlit run dashboard.py
+    volumes:
+      - ./data.db:/app/data.db
+      - ./.env:/app/.env
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+    networks:
+      - antigravity-net
+
+networks:
+  antigravity-net:
+    driver: bridge

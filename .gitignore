@@ -1,0 +1,7 @@
+venv/
+*.log
+*.sqlite3
+*.pyc
+__pycache__/
+data.db
+.streamlit/logs/

@@ -1,0 +1,44 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
+from typing import Literal
+
+class Settings(BaseSettings):
+    """
+    Application Configuration
+    """
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
+
+    # Bybit API Credentials
+    BYBIT_API_KEY: str = Field(default="", description="Bybit API Public Key")
+    BYBIT_API_SECRET: str = Field(default="", description="Bybit API Secret Key")
+    BYBIT_TESTNET: bool = Field(True, description="Use Testnet if True")
+
+    # System Configuration
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    ENVIRONMENT: Literal["development", "production"] = "development"
+
+    # Risk Management
+    MAX_DAILY_LOSS: float = Field(100.0, description="Max daily loss in USDT")
+    MAX_POSITION_SIZE: float = Field(1000.0, description="Max position size in USDT")
+
+    # AI / LLM Configuration
+    LLM_API_KEY: str = Field(default="", description="API Key for LLM Provider")
+    LLM_BASE_URL: str = Field(default="https://api.deepseek.com/v1", description="Base URL for LLM API")
+    LLM_MODEL: str = Field(default="deepseek-chat", description="Model Name")
+
+    # Simulation Mode
+    SIMULATION_MODE: bool = Field(True, description="Enable Paper Trading")
+    INITIAL_CAPITAL: float = Field(10000.0, description="Initial Paper Trading Capital (USDT)")
+
+    # Machine Learning
+    ENABLE_ML: bool = Field(True, description="Enable ML Engine")
+
+    # Security
+    AUDIT_ENABLED: bool = Field(True, description="Enable Audit Logging")
+
+# Global Settings Instance
+settings = Settings()

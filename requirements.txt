@@ -1,0 +1,9 @@
+aiohttp
+pydantic
+pydantic-settings
+structlog
+pandas
+ta
+streamlit
+plotly
+sqlalchemy
