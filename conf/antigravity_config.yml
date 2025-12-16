@@ -1,0 +1,30 @@
+# Configuration for Project Antigravity (Hummingbot Refactor)
+
+# Market Configuration
+markets:
+  bybit_perpetual:
+    - BTC-USDT
+    - ETH-USDT
+
+# Strategies to run
+active_controllers:
+  - macd_controller
+  - rsi_controller
+  - ai_copilot
+
+# Default Parameters
+parameters:
+  leverage: 10
+  position_size_usdt: 100
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.04
+  time_limit: 86400
+
+# API Keys (Placeholders - injected via env vars in Docker)
+bybit:
+  api_key: "${BYBIT_API_KEY}"
+  api_secret: "${BYBIT_API_SECRET}"
+
+ai:
+  api_key: "${LLM_API_KEY}"
+  model: "deepseek-chat"

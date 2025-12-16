@@ -89,22 +89,22 @@ with tab2:
     st.subheader("Paper Trading Portfolio")
     try:
         df_trades = pd.read_sql("SELECT * FROM trades ORDER BY created_at DESC", engine)
-        
+
         # Calculate Current Balance logic (Simplistic for UI)
         # In deployment we'd query PaperBroker but here we read DB
-        # This is a bit disjointed, normally Dashboard pulls from API or DB state. 
+        # This is a bit disjointed, normally Dashboard pulls from API or DB state.
         # For H09, we just show Trade History and aggregated PnL.
-        
+
         if not df_trades.empty:
             realized_pnl = df_trades['pnl'].sum()
             col1, col2 = st.columns(2)
             col1.metric("Realized PnL", f"${realized_pnl:.2f}")
             col2.metric("Total Trades", len(df_trades))
-            
+
             st.dataframe(df_trades, use_container_width=True)
         else:
             st.info("No Trades Executed yet.")
-            
+
     except Exception as e:
         st.error(f"Error loading Trades: {e}")
 

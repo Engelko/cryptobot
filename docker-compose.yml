@@ -1,29 +1,36 @@
+version: "3.9"
+
 services:
-  engine:
-    build: .
+  hummingbot:
+    image: hummingbot/hummingbot:latest
     container_name: antigravity-engine
-    command: python main.py
     volumes:
-      - ./data.db:/app/data.db
-      - ./audit.log:/app/audit.log
-      - ./.env:/app/.env
-    restart: unless-stopped
-    networks:
-      - antigravity-net
+      - ./conf:/conf
+      - ./controllers:/conf/controllers
+      - ./scripts:/conf/scripts
+      - ./logs:/logs
+      - ./data:/data
+    environment:
+      - CONFIG_PASSWORD=a
+      - BYBIT_API_KEY=${BYBIT_API_KEY}
+      - BYBIT_API_SECRET=${BYBIT_API_SECRET}
+      - LLM_API_KEY=${LLM_API_KEY}
+    network_mode: host
+    tty: true
+    stdin_open: true
+    # Command to auto-start the script
+    command: "start --script scripts/antigravity_loader.py"
 
   dashboard:
-    build: .
+    image: hummingbot/dashboard:latest
     container_name: antigravity-dashboard
-    command: streamlit run dashboard.py
-    volumes:
-      - ./data.db:/app/data.db
-      - ./.env:/app/.env
     ports:
       - "8501:8501"
-    restart: unless-stopped
-    networks:
-      - antigravity-net
+    volumes:
+      - ./data:/data
+    environment:
+      - AUTH_SYSTEM_ENABLED=False
+    restart: always
 
-networks:
-  antigravity-net:
-    driver: bridge
+# Note: Dashboard connects to HB via shared volume (sqlite DB) or Broker.
+# For V2, Dashboard might need specific configuration to read the sqlite DB created by StrategyV2.
