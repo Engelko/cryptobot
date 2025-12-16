@@ -4,6 +4,8 @@ import plotly.graph_objects as go
 from sqlalchemy import create_engine
 import time
 import asyncio
+import os
+import json
 from antigravity.config import settings
 from antigravity.client import BybitClient
 
@@ -57,7 +59,7 @@ if auto_refresh:
     st.rerun()
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Market", "Portfolio (Sim)", "Signals", "AI", "System", "Help"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Market", "Portfolio (Sim)", "Signals", "AI", "System", "Settings", "Help"])
 
 with tab1:
     st.subheader("Live Market Data")
@@ -138,7 +140,7 @@ with tab5:
         "Mode": "Simulation (Paper)" if settings.SIMULATION_MODE else "Live Trading",
         "Risk Manager": "Active",
         "Database": "Connected",
-        "Active Strategies": ["MACD_Trend", "RSI_Reversion"],
+        "Active Strategies": settings.ACTIVE_STRATEGIES,
         "Environment": settings.ENVIRONMENT
     })
 
@@ -148,6 +150,79 @@ with tab5:
     st.text(f"Max Position Size: ${settings.MAX_POSITION_SIZE}")
 
 with tab6:
+    st.subheader("Settings Configuration")
+    st.info("Note: Changes require an application restart to take effect.")
+
+    with st.form("config_form"):
+        # Trading Symbols
+        # Convert list to comma-separated string for editing
+        current_symbols = settings.TRADING_SYMBOLS
+        if isinstance(current_symbols, list):
+            current_symbols_str = ", ".join(current_symbols)
+        else:
+            current_symbols_str = str(current_symbols)
+
+        new_symbols_str = st.text_input("Trading Symbols (comma separated)", value=current_symbols_str)
+
+        # Active Strategies
+        available_strategies = ["MACD_Trend", "RSI_Reversion"]
+        current_strategies = settings.ACTIVE_STRATEGIES
+        if not isinstance(current_strategies, list):
+             current_strategies = [current_strategies]
+
+        # Ensure current strategies are in available list to avoid UI errors
+        default_strategies = [s for s in current_strategies if s in available_strategies]
+
+        new_strategies = st.multiselect("Active Strategies", options=available_strategies, default=default_strategies)
+
+        # Risk Management
+        new_max_daily_loss = st.number_input("Max Daily Loss (USDT)", value=float(settings.MAX_DAILY_LOSS))
+        new_max_position_size = st.number_input("Max Position Size (USDT)", value=float(settings.MAX_POSITION_SIZE))
+
+        submitted = st.form_submit_button("Save Configuration")
+
+        if submitted:
+            try:
+                # Update .env file
+                env_path = ".env"
+                if not os.path.exists(env_path):
+                    with open(env_path, "w") as f:
+                        f.write("")
+
+                # Read lines
+                with open(env_path, "r") as f:
+                    lines = f.readlines()
+
+                config_map = {
+                    "TRADING_SYMBOLS": f'"{new_symbols_str}"', # Wrap in quotes
+                    "ACTIVE_STRATEGIES": json.dumps(new_strategies),
+                    "MAX_DAILY_LOSS": str(new_max_daily_loss),
+                    "MAX_POSITION_SIZE": str(new_max_position_size)
+                }
+
+                new_lines = []
+                # Update existing keys
+                for line in lines:
+                    key = line.split("=")[0].strip()
+                    if key in config_map:
+                        new_lines.append(f"{key}={config_map[key]}\n")
+                        del config_map[key]
+                    else:
+                        new_lines.append(line)
+
+                # Append new keys
+                for key, val in config_map.items():
+                    new_lines.append(f"{key}={val}\n")
+
+                with open(env_path, "w") as f:
+                    f.writelines(new_lines)
+
+                st.success("Configuration saved! Please restart the application.")
+
+            except Exception as e:
+                st.error(f"Failed to save configuration: {e}")
+
+with tab7:
     st.subheader("User Guide")
     st.markdown("""
     ### How to use Project Antigravity
@@ -164,7 +239,7 @@ with tab6:
     3. Restart the application.
 
     **3. Strategies**
-    Currently, the following strategies are active:
+    You can select active strategies in the **Settings** tab.
 
     *   **MACD_Trend (Moving Average Convergence Divergence):**
         *   **Logic:** A trend-following momentum indicator.
@@ -178,11 +253,17 @@ with tab6:
         *   **Sell Signal:** When RSI rises above 70 (Overbought), indicating the price might drop.
         *   **Purpose:** Captures potential reversals in price.
 
-    **4. Configuration**
-    You can configure which pairs to trade by editing the `.env` file:
-    `TRADING_SYMBOLS=["BTCUSDT", "ETHUSDT"]`
+    **4. Portfolio & Signals**
+    *   **Portfolio (Sim):** This tab shows simulated trades executed by the bot. Even if you are not running real money, the bot simulates execution to track performance. The 6 trades you see were likely generated during initial testing or simulation runs.
+    *   **Strategy Signals:** This tab lists the raw opportunities identified by the strategies (e.g., "RSI is Oversold"). Not all signals become trades (e.g., if Risk Management blocks them).
 
-    **5. Control**
+    **5. Configuration**
+    Use the **Settings** tab to change:
+    *   **Trading Symbols:** Comma-separated list (e.g., `BTCUSDT, ETHUSDT`).
+    *   **Active Strategies:** Select which strategies to run.
+    *   **Risk Limits:** Set Max Daily Loss and Position Size.
+
+    **6. Control**
     - **Dashboard**: Use this interface to monitor performance.
     - **Trading**: The bot executes trades automatically. Manual intervention is done by stopping the bot or using the Exchange interface directly.
     """)
