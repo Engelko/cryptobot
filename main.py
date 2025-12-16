@@ -38,12 +38,15 @@ async def main():
     # 2. Initialize Components
     
     # Register Strategies
+    from antigravity.config import settings
+    symbols = settings.TRADING_SYMBOLS
+
     # MACD Params: 12, 26, 9
-    macd = MACDStrategy(name="MACD_Trend", symbols=["BTCUSDT"])
+    macd = MACDStrategy(name="MACD_Trend", symbols=symbols)
     strategy_engine.register_strategy(macd)
     
     # RSI Params: 14, 70, 30
-    rsi = RSIStrategy(name="RSI_Reversion", symbols=["BTCUSDT"])
+    rsi = RSIStrategy(name="RSI_Reversion", symbols=symbols)
     strategy_engine.register_strategy(rsi)
     
     # Initialize Engine & Event Bus
@@ -58,11 +61,13 @@ async def main():
     # Start WebSocket Data Feed
     global ws_client
     ws_client = BybitWebSocket()
-    # Subscribe to 1-minute candles for BTCUSDT
-    # Note: connect() runs a loop, so we must run it as a task
-    asyncio.create_task(ws_client.connect(["kline.1.BTCUSDT"]))
 
-    logger.info("system_online", engine="active", strategies=["MACD_Trend", "RSI_Reversion"])
+    # Subscribe to 1-minute candles for all symbols
+    topics = [f"kline.1.{s}" for s in symbols]
+    # Note: connect() runs a loop, so we must run it as a task
+    asyncio.create_task(ws_client.connect(topics))
+
+    logger.info("system_online", engine="active", strategies=["MACD_Trend", "RSI_Reversion"], symbols=symbols)
 
     # Keep alive
     try:

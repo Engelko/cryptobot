@@ -60,9 +60,15 @@ if auto_refresh:
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Market", "Portfolio (Sim)", "Signals", "AI", "System", "Help"])
 
 with tab1:
-    st.subheader("Live Market Data (BTCUSDT)")
+    st.subheader("Live Market Data")
+
+    # Symbol Selector
+    active_symbols = settings.TRADING_SYMBOLS
+    selected_symbol = st.selectbox("Select Pair", active_symbols, index=0)
+
     try:
-        df_kline = pd.read_sql("SELECT * FROM klines ORDER BY ts DESC LIMIT 100", engine)
+        # Use parameterized query to be safe, though symbols come from config
+        df_kline = pd.read_sql(f"SELECT * FROM klines WHERE symbol='{selected_symbol}' ORDER BY ts DESC LIMIT 100", engine)
         if not df_kline.empty:
             df_kline = df_kline.sort_values("ts")
             fig = go.Figure(data=[go.Candlestick(x=pd.to_datetime(df_kline['ts'], unit='ms'),
@@ -70,10 +76,10 @@ with tab1:
                             high=df_kline['high'],
                             low=df_kline['low'],
                             close=df_kline['close'])])
-            fig.update_layout(height=500, title="BTCUSDT Price Action")
+            fig.update_layout(height=500, title=f"{selected_symbol} Price Action")
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("No Market Data Available yet.")
+            st.warning(f"No Market Data Available for {selected_symbol} yet.")
     except Exception as e:
         st.error(f"Error loading Klines: {e}")
 
@@ -158,10 +164,25 @@ with tab6:
     3. Restart the application.
 
     **3. Strategies**
-    Currently, **MACD** and **RSI** strategies are active by default for BTCUSDT.
-    They automatically generate signals based on market data.
+    Currently, the following strategies are active:
 
-    **4. Control**
+    *   **MACD_Trend (Moving Average Convergence Divergence):**
+        *   **Logic:** A trend-following momentum indicator.
+        *   **Buy Signal:** When the MACD line crosses *above* the Signal line (Bullish Crossover).
+        *   **Sell Signal:** When the MACD line crosses *below* the Signal line (Bearish Crossover).
+        *   **Purpose:** Captures price trends.
+
+    *   **RSI_Reversion (Relative Strength Index):**
+        *   **Logic:** A momentum oscillator measuring the speed and change of price movements.
+        *   **Buy Signal:** When RSI drops below 30 (Oversold), indicating the price might bounce back up.
+        *   **Sell Signal:** When RSI rises above 70 (Overbought), indicating the price might drop.
+        *   **Purpose:** Captures potential reversals in price.
+
+    **4. Configuration**
+    You can configure which pairs to trade by editing the `.env` file:
+    `TRADING_SYMBOLS=["BTCUSDT", "ETHUSDT"]`
+
+    **5. Control**
     - **Dashboard**: Use this interface to monitor performance.
     - **Trading**: The bot executes trades automatically. Manual intervention is done by stopping the bot or using the Exchange interface directly.
     """)
