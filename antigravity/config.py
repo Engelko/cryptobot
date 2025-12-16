@@ -40,5 +40,8 @@ class Settings(BaseSettings):
     # Security
     AUDIT_ENABLED: bool = Field(True, description="Enable Audit Logging")
 
+    # Database
+    DATABASE_URL: str = Field("sqlite:///data.db", description="Database URL")
+
 # Global Settings Instance
 settings = Settings()
