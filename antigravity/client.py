@@ -81,6 +81,25 @@ class BybitClient:
         res = await self._request("GET", endpoint, params)
         return res.get("list", [])
 
+    async def place_order(self, category: str, symbol: str, side: str, orderType: str, qty: str, price: str = None, timeInForce: str = "GTC") -> Dict:
+        """
+        Place a new order.
+        """
+        endpoint = "/v5/order/create"
+        payload = {
+            "category": category,
+            "symbol": symbol,
+            "side": side,
+            "orderType": orderType,
+            "qty": qty,
+            "timeInForce": timeInForce
+        }
+        if price:
+            payload["price"] = price
+
+        res = await self._request("POST", endpoint, payload)
+        return res
+
     async def get_server_time(self) -> int:
          endpoint = "/v5/market/time"
          res = await self._request("GET", endpoint)
