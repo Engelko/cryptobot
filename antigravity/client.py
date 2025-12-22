@@ -96,7 +96,50 @@ class BybitClient:
             "coin": coin
         }
         res = await self._request("GET", endpoint, params)
-        # Result structure: { "list": [ { "coin": [ ... ] } ] }
         if res and "list" in res and len(res["list"]) > 0:
              return res["list"][0]
         return {}
+
+    async def get_positions(self, category: str = "linear", symbol: str = None) -> List[Dict]:
+        """
+        Get Open Positions.
+        """
+        endpoint = "/v5/position/list"
+        params = {
+            "category": category,
+            "settleCoin": "USDT"  # For linear, usually settleCoin is USDT
+        }
+        if symbol:
+            params["symbol"] = symbol
+
+        res = await self._request("GET", endpoint, params)
+        return res.get("list", [])
+
+    async def get_open_orders(self, category: str = "linear", symbol: str = None) -> List[Dict]:
+        """
+        Get Real-time Open Orders.
+        """
+        endpoint = "/v5/order/realtime"
+        params = {
+            "category": category,
+        }
+        if symbol:
+            params["symbol"] = symbol
+
+        res = await self._request("GET", endpoint, params)
+        return res.get("list", [])
+
+    async def get_closed_pnl(self, category: str = "linear", symbol: str = None, limit: int = 50) -> List[Dict]:
+        """
+        Get Closed PnL (History).
+        """
+        endpoint = "/v5/position/closed-pnl"
+        params = {
+            "category": category,
+            "limit": limit
+        }
+        if symbol:
+            params["symbol"] = symbol
+
+        res = await self._request("GET", endpoint, params)
+        return res.get("list", [])
