@@ -88,16 +88,28 @@ class BybitClient:
 
     async def get_wallet_balance(self, coin: str = "USDT") -> Dict[str, Any]:
         """
-        Get Unified Account Wallet Balance.
+        Get Wallet Balance. Tries UNIFIED then CONTRACT (Standard).
         """
         endpoint = "/v5/account/wallet-balance"
-        params = {
-            "accountType": "UNIFIED",
-            "coin": coin
-        }
-        res = await self._request("GET", endpoint, params)
-        if res and "list" in res and len(res["list"]) > 0:
-             return res["list"][0]
+
+        # 1. Try UNIFIED
+        try:
+            params = {"accountType": "UNIFIED", "coin": coin}
+            res = await self._request("GET", endpoint, params)
+            if res and "list" in res and len(res["list"]) > 0:
+                 return res["list"][0]
+        except Exception:
+            pass # Continue to try CONTRACT
+
+        # 2. Try CONTRACT (Standard Account)
+        try:
+            params = {"accountType": "CONTRACT", "coin": coin}
+            res = await self._request("GET", endpoint, params)
+            if res and "list" in res and len(res["list"]) > 0:
+                 return res["list"][0]
+        except Exception:
+            pass
+
         return {}
 
     async def get_positions(self, category: str = "linear", symbol: str = None) -> List[Dict]:
