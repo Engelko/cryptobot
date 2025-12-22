@@ -4,6 +4,8 @@ import plotly.graph_objects as go
 from sqlalchemy import create_engine
 import time
 import asyncio
+import os
+import json
 from antigravity.config import settings
 from antigravity.client import BybitClient
 
@@ -24,12 +26,18 @@ if auto_refresh:
     st.rerun()
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Market", "Live Portfolio", "Signals", "AI", "System"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Market", "Live Portfolio", "Signals", "AI", "System", "Settings", "Help"])
 
 with tab1:
-    st.subheader("Live Market Data (BTCUSDT)")
+    st.subheader("Live Market Data")
+
+    # Symbol Selector
+    active_symbols = settings.TRADING_SYMBOLS
+    selected_symbol = st.selectbox("Select Pair", active_symbols, index=0)
+
     try:
-        df_kline = pd.read_sql("SELECT * FROM klines ORDER BY ts DESC LIMIT 100", engine)
+        # Use parameterized query to be safe, though symbols come from config
+        df_kline = pd.read_sql(f"SELECT * FROM klines WHERE symbol='{selected_symbol}' ORDER BY ts DESC LIMIT 100", engine)
         if not df_kline.empty:
             df_kline = df_kline.sort_values("ts")
             fig = go.Figure(data=[go.Candlestick(x=pd.to_datetime(df_kline['ts'], unit='ms'),
@@ -37,10 +45,10 @@ with tab1:
                             high=df_kline['high'],
                             low=df_kline['low'],
                             close=df_kline['close'])])
-            fig.update_layout(height=500, title="BTCUSDT Price Action")
+            fig.update_layout(height=500, title=f"{selected_symbol} Price Action")
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("No Market Data Available yet.")
+            st.warning(f"No Market Data Available for {selected_symbol} yet.")
     except Exception as e:
         st.error(f"Error loading Klines: {e}")
 
@@ -165,7 +173,133 @@ with tab5:
     st.subheader("System Health")
     st.json({
         "Status": "Online",
-        "Mode": "Simulation (Paper)",
+        "Mode": "Simulation (Paper)" if settings.SIMULATION_MODE else "Live Trading",
         "Risk Manager": "Active",
-        "Database": "Connected"
+        "Database": "Connected",
+        "Active Strategies": settings.ACTIVE_STRATEGIES,
+        "Environment": settings.ENVIRONMENT
     })
+
+    st.subheader("Configuration (Read-only)")
+    st.text(f"Config Source: .env file")
+    st.text(f"Max Daily Loss: ${settings.MAX_DAILY_LOSS}")
+    st.text(f"Max Position Size: ${settings.MAX_POSITION_SIZE}")
+
+with tab6:
+    st.subheader("Settings Configuration")
+    st.info("Note: Changes require an application restart to take effect.")
+
+    with st.form("config_form"):
+        # Trading Symbols
+        # Convert list to comma-separated string for editing
+        current_symbols = settings.TRADING_SYMBOLS
+        if isinstance(current_symbols, list):
+            current_symbols_str = ", ".join(current_symbols)
+        else:
+            current_symbols_str = str(current_symbols)
+
+        new_symbols_str = st.text_input("Trading Symbols (comma separated)", value=current_symbols_str)
+
+        # Active Strategies
+        available_strategies = ["MACD_Trend", "RSI_Reversion"]
+        current_strategies = settings.ACTIVE_STRATEGIES
+        if not isinstance(current_strategies, list):
+             current_strategies = [current_strategies]
+
+        # Ensure current strategies are in available list to avoid UI errors
+        default_strategies = [s for s in current_strategies if s in available_strategies]
+
+        new_strategies = st.multiselect("Active Strategies", options=available_strategies, default=default_strategies)
+
+        # Risk Management
+        new_max_daily_loss = st.number_input("Max Daily Loss (USDT)", value=float(settings.MAX_DAILY_LOSS))
+        new_max_position_size = st.number_input("Max Position Size (USDT)", value=float(settings.MAX_POSITION_SIZE))
+
+        submitted = st.form_submit_button("Save Configuration")
+
+        if submitted:
+            try:
+                # Update .env file
+                env_path = ".env"
+                if not os.path.exists(env_path):
+                    with open(env_path, "w") as f:
+                        f.write("")
+
+                # Read lines
+                with open(env_path, "r") as f:
+                    lines = f.readlines()
+
+                config_map = {
+                    "TRADING_SYMBOLS": f'"{new_symbols_str}"', # Wrap in quotes
+                    "ACTIVE_STRATEGIES": json.dumps(new_strategies),
+                    "MAX_DAILY_LOSS": str(new_max_daily_loss),
+                    "MAX_POSITION_SIZE": str(new_max_position_size)
+                }
+
+                new_lines = []
+                # Update existing keys
+                for line in lines:
+                    key = line.split("=")[0].strip()
+                    if key in config_map:
+                        new_lines.append(f"{key}={config_map[key]}\n")
+                        del config_map[key]
+                    else:
+                        new_lines.append(line)
+
+                # Append new keys
+                for key, val in config_map.items():
+                    new_lines.append(f"{key}={val}\n")
+
+                with open(env_path, "w") as f:
+                    f.writelines(new_lines)
+
+                st.success("Configuration saved! Please restart the application.")
+
+            except Exception as e:
+                st.error(f"Failed to save configuration: {e}")
+
+with tab7:
+    st.subheader("User Guide")
+    st.markdown("""
+    ### How to use Project Antigravity
+
+    **1. Architecture**
+    This application is an **automated trading engine**, not a manual terminal.
+    It runs autonomously based on the strategies defined in the code and configuration settings.
+
+    **2. Configuration**
+    All settings (API keys, Risk limits, Strategy parameters) are managed via the `.env` file in the project root.
+    To change settings:
+    1. Stop the application.
+    2. Edit `.env`.
+    3. Restart the application.
+
+    **3. Strategies**
+    You can select active strategies in the **Settings** tab.
+
+    *   **MACD_Trend (Moving Average Convergence Divergence):**
+        *   **Logic:** A trend-following momentum indicator.
+        *   **Buy Signal:** When the MACD line crosses *above* the Signal line (Bullish Crossover).
+        *   **Sell Signal:** When the MACD line crosses *below* the Signal line (Bearish Crossover).
+        *   **Purpose:** Captures price trends.
+
+    *   **RSI_Reversion (Relative Strength Index):**
+        *   **Logic:** A momentum oscillator measuring the speed and change of price movements.
+        *   **Buy Signal:** When RSI drops below 30 (Oversold), indicating the price might bounce back up.
+        *   **Sell Signal:** When RSI rises above 70 (Overbought), indicating the price might drop.
+        *   **Purpose:** Captures potential reversals in price.
+
+    **4. Portfolio & Signals**
+    *   **Live Portfolio (Bybit):** This tab shows real-time data from your Bybit account (Wallet Balance, Positions, Orders, History). If you see "API Key not found", configure it in the Settings or .env file.
+    *   **Strategy Signals:** This tab lists the raw opportunities identified by the strategies.
+
+    **5. Configuration**
+    Use the **Settings** tab to change:
+    *   **Trading Symbols:** Comma-separated list (e.g., `BTCUSDT, ETHUSDT`).
+    *   **Active Strategies:** Select which strategies to run.
+    *   **Risk Limits:** Set Max Daily Loss and Position Size.
+
+    **6. Control**
+    - **Dashboard**: Use this interface to monitor performance.
+    - **Trading**: The bot executes trades automatically. Manual intervention is done by stopping the bot or using the Exchange interface directly.
+    """)
