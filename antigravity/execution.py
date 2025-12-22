@@ -4,6 +4,7 @@ from antigravity.strategy import Signal, SignalType
 from antigravity.logging import get_logger
 from antigravity.database import db
 from antigravity.audit import audit
+from antigravity.client import BybitClient
 
 logger = get_logger("execution")
 
@@ -17,16 +18,18 @@ class PaperBroker:
 
     async def execute_order(self, signal: Signal, strategy_name: str):
         price = signal.price
-        # Default Quantity Logic (Simplified: Fixed notional)
-        position_size_usdt = 1000.0
         
+        # Determine Size based on balance and settings
+        max_size = settings.MAX_POSITION_SIZE
+        # Use available balance (virtual)
+        trade_size = min(self.balance, max_size)
+
+        if trade_size < 10.0: # Minimum virtual order check
+             logger.warning("paper_insufficient_funds", balance=self.balance, cost=trade_size)
+             return
+
         if signal.type == SignalType.BUY:
-            cost = position_size_usdt
-            if self.balance < cost:
-                logger.warning("paper_insufficient_funds", balance=self.balance, cost=cost)
-                audit.log_event("EXECUTION", f"BUY REJECTED: Insufficient Funds {self.balance} < {cost}", "WARNING")
-                return
-            
+            cost = trade_size
             qty = cost / price
             self.balance -= cost
             
@@ -71,20 +74,143 @@ class PaperBroker:
             db.save_trade(signal.symbol, "SELL", price, qty, value, strategy_name, exec_type="PAPER", pnl=pnl)
             audit.log_event("EXECUTION", f"SELL FILLED: {signal.symbol} {qty:.4f} @ {price} | PnL: {pnl:.2f}", "INFO")
 
+class RealBroker:
+    """
+    Executes orders on Bybit via API.
+    """
+    async def execute_order(self, signal: Signal, strategy_name: str):
+        client = BybitClient()
+        try:
+            # 1. Fetch Available Balance (USDT)
+            balance_data = await client.get_wallet_balance(coin="USDT")
+            available_balance = self._parse_available_balance(balance_data)
+
+            logger.info("real_execution_start", symbol=signal.symbol, available_balance=available_balance)
+
+            if signal.type == SignalType.BUY:
+                # 2. Determine Trade Size
+                # "Take from wallet balance... not more than is on the wallet"
+                # Logic: min(Configured_Max, Available_Balance)
+                max_size = settings.MAX_POSITION_SIZE
+                trade_size = min(available_balance, max_size)
+
+                # Minimum order size check (approx 10 USDT for Bybit usually)
+                if trade_size < 10.0:
+                    logger.warning("real_insufficient_funds", available=available_balance, required=10.0)
+                    audit.log_event("EXECUTION", f"BUY REJECTED: Low Balance {available_balance:.2f} < 10", "WARNING")
+                    return
+
+                # 3. Calculate Quantity
+                # For Linear Perp (BTCUSDT), qty is in Base Coin (BTC)
+                price = signal.price
+                qty = trade_size / price
+
+                # Rounding: Bybit requires specific precision.
+                # For safety, we round to 3 decimals. Ideally should fetch instrument info.
+                qty_str = f"{qty:.3f}"
+
+                # 4. Place Order
+                # Market Order for immediate execution
+                res = await client.place_order(
+                    category="linear",
+                    symbol=signal.symbol,
+                    side="Buy",
+                    orderType="Market",
+                    qty=qty_str
+                )
+
+                if res and "orderId" in res:
+                    logger.info("real_buy_filled", order_id=res["orderId"], qty=qty_str, cost=trade_size)
+                    db.save_trade(signal.symbol, "BUY", price, float(qty_str), trade_size, strategy_name, exec_type="REAL")
+                    audit.log_event("EXECUTION", f"REAL BUY: {signal.symbol} {qty_str} @ ~{price}", "INFO")
+                else:
+                    logger.error("real_buy_failed", res=res)
+                    audit.log_event("EXECUTION", f"BUY FAILED: {str(res)}", "ERROR")
+
+            elif signal.type == SignalType.SELL:
+                # For SELL (Close Position), we need to check if we have an open position first.
+                # In this simple bot, SELL usually means "Close Long".
+                # We need to know the open size.
+
+                positions = await client.get_positions(category="linear", symbol=signal.symbol)
+                # positions is a list
+                if not positions:
+                     logger.warning("real_sell_no_position", symbol=signal.symbol)
+                     return
+
+                # Assuming single position mode or net mode
+                # Find position with size > 0
+                target_pos = None
+                for p in positions:
+                    if float(p.get("size", 0)) > 0:
+                        target_pos = p
+                        break
+
+                if not target_pos:
+                    logger.warning("real_sell_no_open_qty", symbol=signal.symbol)
+                    return
+
+                qty_to_close = target_pos["size"] # Close full position
+
+                res = await client.place_order(
+                    category="linear",
+                    symbol=signal.symbol,
+                    side="Sell",
+                    orderType="Market",
+                    qty=qty_to_close
+                )
+
+                if res and "orderId" in res:
+                    logger.info("real_sell_filled", order_id=res["orderId"], qty=qty_to_close)
+                    # We don't easily know PnL immediately here without waiting for fill,
+                    # so we save 0.0 or estimate
+                    db.save_trade(signal.symbol, "SELL", signal.price, float(qty_to_close), 0.0, strategy_name, exec_type="REAL")
+                    audit.log_event("EXECUTION", f"REAL SELL: {signal.symbol} {qty_to_close}", "INFO")
+
+        except Exception as e:
+            logger.error("real_execution_error", error=str(e))
+            audit.log_event("EXECUTION", f"ERROR: {str(e)}", "ERROR")
+        finally:
+            await client.close()
+
+    def _parse_available_balance(self, data: Dict) -> float:
+        """
+        Extract available USDT balance from Unified or Contract response.
+        """
+        try:
+            # 1. Unified Account
+            if "totalWalletBalance" in data:
+                 # In UTA, available balance for opening positions can be 'totalMarginBalance'
+                 # or specifically 'totalAvailableBalance' if present?
+                 # Bybit V5: totalMarginBalance is equity.
+                 # We want available balance. 'totalAvailableBalance' is not always in the wallet-balance endpoint?
+                 # 'totalWalletBalance' is cash.
+                 # Let's use totalWalletBalance for simplicity as requested "money on wallet".
+                 return float(data.get("totalWalletBalance", 0.0))
+
+            # 2. Contract Account
+            elif "coin" in data:
+                for c in data["coin"]:
+                    if c.get("coin") == "USDT":
+                        return float(c.get("walletBalance", 0.0))
+
+        except Exception:
+            pass
+        return 0.0
+
 class ExecutionManager:
     """
     Routes orders to the appropriate broker.
     """
     def __init__(self):
         self.paper_broker = PaperBroker()
-        self.is_simulation = settings.SIMULATION_MODE
+        self.real_broker = RealBroker()
 
     async def execute(self, signal: Signal, strategy_name: str):
-        if self.is_simulation:
+        if settings.SIMULATION_MODE:
             await self.paper_broker.execute_order(signal, strategy_name)
         else:
-            logger.warning("real_execution_not_implemented", symbol=signal.symbol)
-            audit.log_event("EXECUTION", f"REAL ORDER UNSUPPORTED: {signal.symbol}", "WARNING")
+            await self.real_broker.execute_order(signal, strategy_name)
 
 # Global Manager
 execution_manager = ExecutionManager()
