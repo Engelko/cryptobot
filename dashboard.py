@@ -21,6 +21,44 @@ st.title("🚀 Project Antigravity: Mission Control")
 st.sidebar.header("Telemetry")
 auto_refresh = st.sidebar.checkbox("Auto Refresh (5s)", value=True)
 
+# Fetch and display Wallet Balance in Sidebar
+if settings.BYBIT_API_KEY:
+    async def fetch_wallet_balance_only():
+        client = BybitClient()
+        try:
+            return await client.get_wallet_balance(coin="USDT")
+        except Exception:
+            return {}
+        finally:
+            await client.close()
+
+    try:
+        # Create a new loop for this sidebar fetch
+        # Note: In Streamlit, creating new loops can sometimes be tricky if one is already running,
+        # but here we are in the main script flow, not inside a callback.
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        balance_data = loop.run_until_complete(fetch_wallet_balance_only())
+        loop.close()
+
+        if balance_data:
+            wb = 0.0
+            # Unified Account
+            if "totalWalletBalance" in balance_data:
+                wb = float(balance_data.get("totalWalletBalance", 0))
+            # Standard/Contract Account
+            elif "coin" in balance_data:
+                for c in balance_data["coin"]:
+                    if c.get("coin") == "USDT":
+                        wb = float(c.get("walletBalance", 0))
+                        break
+
+            st.sidebar.metric("Wallet Balance (USDT)", f"${wb:,.2f}")
+        else:
+             st.sidebar.warning("Balance: N/A")
+    except Exception as e:
+        st.sidebar.error(f"Err: {str(e)[:20]}")
+
 if auto_refresh:
     time.sleep(5)
     st.rerun()
