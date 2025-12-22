@@ -6,12 +6,21 @@ import time
 import asyncio
 import os
 import json
+import logging
 from antigravity.config import settings
 from antigravity.client import BybitClient
 from antigravity.logging import configure_logging
 
 # Configure logging for dashboard (creates/writes to antigravity.log)
-configure_logging()
+# Check if file handler already exists to avoid duplication on re-runs
+has_file_handler = False
+for h in logging.getLogger().handlers:
+    if isinstance(h, logging.FileHandler) and "antigravity.log" in h.baseFilename:
+        has_file_handler = True
+        break
+
+if not has_file_handler:
+    configure_logging()
 
 # Database Connection
 db_path = settings.DATABASE_URL

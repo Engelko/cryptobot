@@ -47,7 +47,16 @@ def configure_logging():
 
     # File Handler for Dashboard visibility
     file_handler = logging.FileHandler("antigravity.log")
-    file_handler.setFormatter(formatter)
+
+    # Use a plain renderer (no colors) for the file handler to ensure readability in dashboard
+    file_formatter = structlog.stdlib.ProcessorFormatter(
+        foreign_pre_chain=shared_processors,
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            structlog.dev.ConsoleRenderer(colors=False),
+        ],
+    )
+    file_handler.setFormatter(file_formatter)
 
     root_logger = logging.getLogger()
     root_logger.addHandler(handler)
