@@ -2,7 +2,6 @@ import json
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import datetime
-from antigravity.config import settings
 
 Base = declarative_base()
 
@@ -52,9 +51,7 @@ class DBTrade(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Database:
-    def __init__(self, db_path=None):
-        if db_path is None:
-            db_path = settings.DATABASE_URL
+    def __init__(self, db_path="sqlite:////opt/cryptobot/data.db"):
         self.engine = create_engine(db_path, connect_args={"check_same_thread": False})
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
