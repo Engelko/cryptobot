@@ -8,6 +8,10 @@ import os
 import json
 from antigravity.config import settings
 from antigravity.client import BybitClient
+from antigravity.logging import configure_logging
+
+# Configure logging for dashboard (creates/writes to antigravity.log)
+configure_logging()
 
 # Database Connection
 db_path = settings.DATABASE_URL
