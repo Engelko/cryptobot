@@ -51,7 +51,7 @@ class DBTrade(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Database:
-    def __init__(self, db_path="sqlite:////opt/cryptobot/data.db"):
+    def __init__(self, db_path="sqlite:///data.db"):
         self.engine = create_engine(db_path, connect_args={"check_same_thread": False})
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
