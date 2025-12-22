@@ -64,7 +64,7 @@ if auto_refresh:
     st.rerun()
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Market", "Live Portfolio", "Signals", "AI", "System", "Settings", "Help"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Market", "Live Portfolio", "Signals", "AI", "System", "Settings", "Help", "Diagnostics"])
 
 with tab1:
     st.subheader("Live Market Data")
@@ -365,3 +365,77 @@ with tab7:
     - **Dashboard**: Use this interface to monitor performance.
     - **Trading**: The bot executes trades automatically. Manual intervention is done by stopping the bot or using the Exchange interface directly.
     """)
+
+with tab8:
+    st.subheader("System Diagnostics")
+
+    # 1. Real-time Logs
+    st.markdown("### Real-time Logs")
+    if st.button("Refresh Logs"):
+        st.rerun()
+
+    log_file = "antigravity.log"
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, "r") as f:
+                lines = f.readlines()
+                last_lines = "".join(lines[-50:]) # Last 50 lines
+                st.code(last_lines, language="text")
+        except Exception as e:
+            st.error(f"Could not read log file: {e}")
+    else:
+        st.warning("Log file not found yet. Start the application to generate logs.")
+
+    st.divider()
+
+    # 2. Manual Order Test
+    st.markdown("### Test Order Execution")
+    st.info("Use this form to test if the bot can successfully place an order on Bybit.")
+
+    with st.form("test_order_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+             test_symbol = st.selectbox("Symbol", settings.TRADING_SYMBOLS, key="test_symbol")
+             test_side = st.selectbox("Side", ["Buy", "Sell"], key="test_side")
+        with col2:
+             test_type = st.selectbox("Type", ["Limit", "Market"], key="test_type")
+             test_qty = st.text_input("Quantity", value="0.001", key="test_qty") # Text input for precision
+
+        test_price = st.text_input("Price (Limit Only)", value="0", key="test_price")
+
+        submit_test = st.form_submit_button("Place Test Order")
+
+        if submit_test:
+            async def place_test_order():
+                client = BybitClient()
+                try:
+                    p = None
+                    if test_type == "Limit":
+                        p = test_price
+
+                    res = await client.place_order(
+                        category="linear",
+                        symbol=test_symbol,
+                        side=test_side,
+                        orderType=test_type,
+                        qty=test_qty,
+                        price=p
+                    )
+                    return res
+                except Exception as e:
+                    return f"Error: {e}"
+                finally:
+                    await client.close()
+
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(place_test_order())
+                loop.close()
+
+                if isinstance(result, dict) and "orderId" in result:
+                    st.success(f"Order Placed Successfully! Order ID: {result['orderId']}")
+                else:
+                    st.error(f"Order Failed: {result}")
+            except Exception as e:
+                st.error(f"Execution Error: {e}")
