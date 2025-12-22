@@ -81,10 +81,34 @@ with tab2:
 
             # 0. Account Info
             if balance:
+                # Extract metrics based on Account Type
+                wb = 0.0
+                mb = 0.0
+                upnl = 0.0
+
+                # Case 1: Unified Trading Account (UTA)
+                if "totalWalletBalance" in balance:
+                    wb = float(balance.get("totalWalletBalance", 0))
+                    mb = float(balance.get("totalMarginBalance", 0))
+                    upnl = float(balance.get("totalPerpUPL", 0)) # Perp Unrealized PnL
+                    if upnl == 0:
+                         # Fallback if totalPerpUPL is not present (some versions)
+                         upnl = float(balance.get("totalUnrealisedPnl", 0))
+
+                # Case 2: Standard/Contract Account (Check 'coin' list)
+                elif "coin" in balance:
+                    for c in balance["coin"]:
+                        if c.get("coin") == "USDT":
+                            wb = float(c.get("walletBalance", 0))
+                            upnl = float(c.get("unrealisedPnl", 0))
+                            # Margin Balance usually equals Equity in Standard if no isolated margin logic simpler
+                            mb = float(c.get("equity", 0))
+                            break
+
                 col1, col2, col3 = st.columns(3)
-                col1.metric("Wallet Balance (USDT)", f"${float(balance.get('walletBalance', 0)):.2f}")
-                col2.metric("Unrealized PnL", f"${float(balance.get('totalUnrealisedPnl', 0)):.2f}")
-                col3.metric("Total Equity", f"${float(balance.get('totalEquity', 0)):.2f}")
+                col1.metric("Wallet Balance", f"${wb:.2f}")
+                col2.metric("Margin Balance", f"${mb:.2f}")
+                col3.metric("Unrealized PnL (Perp)", f"${upnl:.2f}", delta=f"{upnl:.2f}")
                 st.divider()
 
             # 1. Open Positions
