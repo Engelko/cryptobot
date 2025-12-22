@@ -45,8 +45,13 @@ def configure_logging():
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
 
+    # File Handler for Dashboard visibility
+    file_handler = logging.FileHandler("antigravity.log")
+    file_handler.setFormatter(formatter)
+
     root_logger = logging.getLogger()
     root_logger.addHandler(handler)
+    root_logger.addHandler(file_handler)
     root_logger.setLevel(settings.LOG_LEVEL)
 
     logging.getLogger("asyncio").setLevel(logging.WARNING)
