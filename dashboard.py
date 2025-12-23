@@ -384,8 +384,14 @@ with tab8:
 
     # 1. Real-time Logs
     st.markdown("### Real-time Logs")
-    if st.button("Refresh Logs"):
-        st.rerun()
+    col_log1, col_log2 = st.columns([1, 4])
+    with col_log1:
+        if st.button("Refresh Logs"):
+            st.rerun()
+    with col_log2:
+        if st.button("Ping Log (Write Test Entry)"):
+            logging.getLogger("dashboard").info("Diagnostics: Test Log Entry from Dashboard")
+            st.rerun()
 
     log_file = "antigravity.log"
     if os.path.exists(log_file):
