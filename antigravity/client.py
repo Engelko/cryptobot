@@ -142,9 +142,6 @@ class BybitClient:
         }
         if symbol:
             params["symbol"] = symbol
-        elif category == "linear":
-            # If no symbol provided for linear, settleCoin is required by Bybit API
-            params["settleCoin"] = "USDT"
 
         res = await self._request("GET", endpoint, params)
         return res.get("list", [])
@@ -159,6 +156,8 @@ class BybitClient:
         }
         if symbol:
             params["symbol"] = symbol
+        elif category == "linear":
+            params["settleCoin"] = "USDT"
 
         res = await self._request("GET", endpoint, params)
         return res.get("list", [])
@@ -174,6 +173,8 @@ class BybitClient:
         }
         if symbol:
             params["symbol"] = symbol
+        elif category == "linear":
+            params["settleCoin"] = "USDT"
 
         res = await self._request("GET", endpoint, params)
         return res.get("list", [])
