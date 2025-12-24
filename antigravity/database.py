@@ -16,7 +16,7 @@ class DBKline(Base):
     close = Column(Float)
     volume = Column(Float)
     ts = Column(Integer) # Unix ms
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
 class DBSignal(Base):
     __tablename__ = 'signals'
@@ -26,7 +26,7 @@ class DBSignal(Base):
     type = Column(String)
     price = Column(Float)
     reason = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
 class DBSentiment(Base):
     __tablename__ = 'sentiment'
@@ -35,7 +35,7 @@ class DBSentiment(Base):
     score = Column(Float)
     reasoning = Column(Text)
     model = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
 class DBTrade(Base):
     __tablename__ = 'trades'
@@ -48,7 +48,7 @@ class DBTrade(Base):
     pnl = Column(Float, default=0.0)
     strategy = Column(String)
     execution_type = Column(String) # REAL / PAPER
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
 class Database:
     def __init__(self, db_path="sqlite:///data.db"):
