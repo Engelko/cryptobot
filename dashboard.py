@@ -403,7 +403,7 @@ with tab8:
             logging.getLogger("dashboard").info("Diagnostics: Test Log Entry from Dashboard")
             st.rerun()
 
-    log_file = "antigravity.log"
+    log_file = "storage/antigravity.log"
     if os.path.exists(log_file):
         try:
             with open(log_file, "r") as f:

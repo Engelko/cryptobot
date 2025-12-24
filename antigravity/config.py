@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     AUDIT_ENABLED: bool = Field(True, description="Enable Audit Logging")
 
     # Database
-    DATABASE_URL: str = Field("sqlite:///data.db", description="Database URL")
+    DATABASE_URL: str = Field("sqlite:///storage/data.db", description="Database URL")
 
     def model_post_init(self, __context):
         # Handle string input for list if coming from .env as a string

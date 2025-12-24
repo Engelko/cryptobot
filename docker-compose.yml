@@ -4,8 +4,7 @@ services:
     container_name: antigravity-engine
     command: python main.py
     volumes:
-      - ./data.db:/app/data.db
-      - ./audit.log:/app/audit.log
+      - ./storage:/app/storage
       - ./.env:/app/.env
     environment:
       - TZ=Europe/Moscow
@@ -18,7 +17,7 @@ services:
     container_name: antigravity-dashboard
     command: streamlit run dashboard.py
     volumes:
-      - ./data.db:/app/data.db
+      - ./storage:/app/storage
       - ./.env:/app/.env
     environment:
       - TZ=Europe/Moscow

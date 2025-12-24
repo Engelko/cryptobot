@@ -46,7 +46,7 @@ def configure_logging():
     handler.setFormatter(formatter)
 
     # File Handler for Dashboard visibility
-    file_handler = logging.FileHandler("antigravity.log")
+    file_handler = logging.FileHandler("storage/antigravity.log")
 
     # Use a plain renderer (no colors) for the file handler to ensure readability in dashboard
     file_formatter = structlog.stdlib.ProcessorFormatter(
