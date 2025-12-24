@@ -40,7 +40,8 @@ if settings.BYBIT_API_KEY:
         client = BybitClient()
         try:
             return await client.get_wallet_balance(coin="USDT")
-        except Exception:
+        except Exception as e:
+            logging.getLogger("dashboard").error(f"Balance fetch failed: {e}")
             return {}
         finally:
             await client.close()
@@ -91,12 +92,21 @@ with tab1:
         df_kline = pd.read_sql(f"SELECT * FROM klines WHERE symbol='{selected_symbol}' ORDER BY ts DESC LIMIT 100", engine)
         if not df_kline.empty:
             df_kline = df_kline.sort_values("ts")
-            fig = go.Figure(data=[go.Candlestick(x=pd.to_datetime(df_kline['ts'], unit='ms'),
+
+            # Convert to Datetime and adjust Timezone
+            ts_series = pd.to_datetime(df_kline['ts'], unit='ms', utc=True)
+            target_tz = os.getenv("TZ", "UTC")
+            try:
+                ts_series = ts_series.dt.tz_convert(target_tz)
+            except Exception as e:
+                logging.getLogger("dashboard").warning(f"Timezone conversion failed: {e}")
+
+            fig = go.Figure(data=[go.Candlestick(x=ts_series,
                             open=df_kline['open'],
                             high=df_kline['high'],
                             low=df_kline['low'],
                             close=df_kline['close'])])
-            fig.update_layout(height=500, title=f"{selected_symbol} Price Action")
+            fig.update_layout(height=500, title=f"{selected_symbol} Price Action ({target_tz})")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning(f"No Market Data Available for {selected_symbol} yet.")
