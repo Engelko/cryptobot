@@ -8,6 +8,7 @@ services:
       - ./.env:/app/.env
     environment:
       - TZ=Europe/Moscow
+      - DATABASE_URL=sqlite:///storage/data.db
     restart: unless-stopped
     networks:
       - antigravity-net
@@ -21,6 +22,7 @@ services:
       - ./.env:/app/.env
     environment:
       - TZ=Europe/Moscow
+      - DATABASE_URL=sqlite:///storage/data.db
     ports:
       - "8501:8501"
     restart: unless-stopped
