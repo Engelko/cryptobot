@@ -117,8 +117,8 @@ class BybitClient:
             res = await self._request("GET", endpoint, params)
             if res and "list" in res and len(res["list"]) > 0:
                  return res["list"][0]
-        except Exception:
-            pass # Continue to try CONTRACT
+        except Exception as e:
+            logger.debug(f"Unified balance fetch failed: {e}")
 
         # 2. Try CONTRACT (Standard Account)
         try:
@@ -126,8 +126,8 @@ class BybitClient:
             res = await self._request("GET", endpoint, params)
             if res and "list" in res and len(res["list"]) > 0:
                  return res["list"][0]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Contract balance fetch failed: {e}")
 
         return {}
 
