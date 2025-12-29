@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field, asdict
-from typing import Any, Callable, Dict, List, Type, Awaitable
+from typing import Any, Callable, Dict, List, Type, Awaitable, Optional
 from datetime import datetime
 import uuid
 from antigravity.logging import get_logger
@@ -41,6 +41,7 @@ class KlineEvent(MarketDataEvent):
     close: float = 0.0
     volume: float = 0.0
     timestamp: int = 0
+    prediction: Optional[Dict[str, float]] = None
 
 @dataclass
 class SentimentEvent(Event):

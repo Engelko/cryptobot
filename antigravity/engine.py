@@ -135,8 +135,28 @@ class StrategyEngine:
         if isinstance(event, KlineEvent):
             db.save_kline(event.symbol, event.interval, event.open, event.high, event.low, event.close, event.volume, event.timestamp)
             
-            # Future: ML Prediction Hook here
-            # prediction = await self.ml_engine.predict_price_movement(event.symbol, {"close": event.close})
+            # ML Prediction Hook
+            try:
+                if getattr(self.ml_engine, "enabled", False):
+                    features = {
+                        "close": event.close,
+                        "volume": event.volume,
+                        "high": event.high,
+                        "low": event.low,
+                        "open": event.open
+                    }
+                    prediction = await self.ml_engine.predict_price_movement(event.symbol, features)
+
+                    if prediction:
+                        event.prediction = prediction
+                        db.save_prediction(
+                            symbol=event.symbol,
+                            prediction_value=prediction.get("predicted_change", 0.0),
+                            confidence=prediction.get("confidence", 0.0),
+                            features=features
+                        )
+            except Exception as e:
+                logger.error("ml_hook_failed", symbol=event.symbol, error=str(e))
 
         # Forward to all strategies
         for name, strategy in self.strategies.items():
