@@ -3,6 +3,9 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, 
 from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import datetime
 from antigravity.config import settings
+from antigravity.logging import get_logger
+
+logger = get_logger("database")
 
 Base = declarative_base()
 
@@ -77,6 +80,7 @@ class Database:
             session.add(s)
             session.commit()
         except Exception as e:
+            logger.error("db_save_signal_failed", error=str(e), strategy=strategy, symbol=symbol)
             session.rollback()
         finally:
             session.close()
@@ -99,6 +103,7 @@ class Database:
             session.add(t)
             session.commit()
         except Exception as e:
+            logger.error("db_save_trade_failed", error=str(e), symbol=symbol, strategy=strat)
             session.rollback()
         finally:
             session.close()
