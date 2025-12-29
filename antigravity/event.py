@@ -49,6 +49,14 @@ class SentimentEvent(Event):
     reasoning: str = ""
     model: str = ""
 
+@dataclass
+class TradeClosedEvent(Event):
+    """Event for completed trade with PnL."""
+    symbol: str = ""
+    pnl: float = 0.0
+    strategy: str = ""
+    execution_type: str = ""
+
 class EventBus:
     """
     Asynchronous Event Bus using asyncio.Queue for decoupling components.
