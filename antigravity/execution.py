@@ -5,6 +5,7 @@ from antigravity.logging import get_logger
 from antigravity.database import db
 from antigravity.audit import audit
 from antigravity.client import BybitClient
+from antigravity.event import event_bus, TradeClosedEvent
 
 logger = get_logger("execution")
 
@@ -73,6 +74,14 @@ class PaperBroker:
             logger.info("paper_sell_filled", symbol=signal.symbol, price=price, qty=qty, pnl=pnl, balance=self.balance)
             db.save_trade(signal.symbol, "SELL", price, qty, value, strategy_name, exec_type="PAPER", pnl=pnl)
             audit.log_event("EXECUTION", f"SELL FILLED: {signal.symbol} {qty:.4f} @ {price} | PnL: {pnl:.2f}", "INFO")
+
+            # Publish PnL Event for Risk Manager
+            await event_bus.publish(TradeClosedEvent(
+                symbol=signal.symbol,
+                pnl=pnl,
+                strategy=strategy_name,
+                execution_type="PAPER"
+            ))
 
 class RealBroker:
     """
@@ -168,10 +177,33 @@ class RealBroker:
 
                 if res and "orderId" in res:
                     logger.info("real_sell_filled", order_id=res["orderId"], qty=qty_to_close)
-                    # We don't easily know PnL immediately here without waiting for fill,
-                    # so we save 0.0 or estimate
-                    db.save_trade(signal.symbol, "SELL", signal.price, float(qty_to_close), 0.0, strategy_name, exec_type="REAL")
-                    audit.log_event("EXECUTION", f"REAL SELL: {signal.symbol} {qty_to_close}", "INFO")
+
+                    # Estimate PnL based on position entry price vs current market price (signal price)
+                    # This is an approximation as the fill price might differ slightly.
+                    try:
+                        entry_price = float(target_pos.get("avgPrice", 0.0))
+                        exit_price = float(signal.price)
+                        qty = float(qty_to_close)
+
+                        # Long PnL = (Exit - Entry) * Qty
+                        estimated_pnl = (exit_price - entry_price) * qty
+
+                        logger.info("real_pnl_estimation", entry=entry_price, exit=exit_price, qty=qty, pnl=estimated_pnl)
+                    except Exception as ex:
+                        logger.warning("real_pnl_estimation_failed", error=str(ex))
+                        estimated_pnl = 0.0
+
+                    # Save trade with estimated PnL
+                    db.save_trade(signal.symbol, "SELL", signal.price, float(qty_to_close), 0.0, strategy_name, exec_type="REAL", pnl=estimated_pnl)
+                    audit.log_event("EXECUTION", f"REAL SELL: {signal.symbol} {qty_to_close} | Est PnL: {estimated_pnl:.2f}", "INFO")
+
+                    # Publish PnL Event for Risk Manager
+                    await event_bus.publish(TradeClosedEvent(
+                        symbol=signal.symbol,
+                        pnl=estimated_pnl,
+                        strategy=strategy_name,
+                        execution_type="REAL"
+                    ))
 
         except Exception as e:
             logger.error("real_execution_error", error=str(e))
