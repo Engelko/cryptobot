@@ -62,8 +62,7 @@ async def main():
     
     # Start AI Copilot
     copilot = AICopilot()
-    await copilot.start() # Note: copilot needs start method defined or simply subscribes in init?
-    # Checking copilot.py: it has async start/stop methods. Good.
+    await copilot.start()
 
     # Start WebSocket Data Feed
     global ws_client, ws_task
