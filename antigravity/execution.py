@@ -94,6 +94,8 @@ class RealBroker:
                 max_size = settings.MAX_POSITION_SIZE
                 trade_size = min(available_balance, max_size)
 
+                logger.info("real_trade_sizing", max_size=max_size, available=available_balance, final_size=trade_size)
+
                 # Minimum order size check (approx 10 USDT for Bybit usually)
                 if trade_size < 10.0:
                     logger.warning("real_insufficient_funds", available=available_balance, required=10.0)
@@ -109,6 +111,8 @@ class RealBroker:
                 # For safety, we round to 3 decimals. Ideally should fetch instrument info.
                 qty_str = f"{qty:.3f}"
 
+                logger.info("real_placing_buy", symbol=signal.symbol, qty=qty_str, expected_price=price)
+
                 # 4. Place Order
                 # Market Order for immediate execution
                 res = await client.place_order(
@@ -118,6 +122,8 @@ class RealBroker:
                     orderType="Market",
                     qty=qty_str
                 )
+
+                logger.info("real_buy_response", response=res)
 
                 if res and "orderId" in res:
                     logger.info("real_buy_filled", order_id=res["orderId"], qty=qty_str, cost=trade_size)
