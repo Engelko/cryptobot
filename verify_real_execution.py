@@ -5,6 +5,7 @@ from antigravity.execution import execution_manager
 from antigravity.strategy import Signal, SignalType
 from antigravity.client import BybitClient
 from antigravity.logging import configure_logging, get_logger
+from antigravity.database import db
 
 # Configure logging to see output
 configure_logging()
@@ -63,6 +64,13 @@ async def verify_real_execution():
     )
 
     print(f"\nInjecting Signal: {test_signal}")
+
+    # 3.5 Save Signal to Database (So it appears in Dashboard)
+    try:
+        db.save_signal(test_signal)
+        print("✅ Signal saved to database (Visible in Dashboard > Signals)")
+    except Exception as e:
+        print(f"❌ Failed to save signal to DB: {e}")
 
     # 4. Execute
     try:
