@@ -7,6 +7,7 @@ from antigravity.risk import RiskManager
 from antigravity.database import db
 from antigravity.execution import execution_manager
 from antigravity.ml_engine import ml_engine
+from antigravity.client import BybitClient
 import pandas as pd
 
 logger = get_logger("strategy_engine")
@@ -37,14 +38,40 @@ class StrategyEngine:
             # Create a DB engine for pandas (if not already available in db, but db instance uses sqlalchemy session)
             # We can use db.engine which is exposed in Database class
 
+            # Create a DB engine for pandas
+            client = None
+
             for symbol in all_symbols:
-                # Load last 300 klines (enough for RSI 14 and MACD 26+9+slack)
-                # Using direct pandas read for efficiency
+                # 1. Try Loading from DB
                 query = f"SELECT * FROM klines WHERE symbol='{symbol}' ORDER BY ts DESC LIMIT 300"
                 df = pd.read_sql(query, db.engine)
 
+                # 2. If Empty/Insufficient, Fetch from API
+                if df.empty or len(df) < 50:
+                    logger.info("warmup_fetching_api", symbol=symbol)
+                    if not client:
+                        client = BybitClient()
+
+                    # Fetch 200 candles (API limit usually)
+                    klines = await client.get_kline(symbol=symbol, interval="1", limit=200)
+                    if klines:
+                        # Save to DB
+                        for k in klines:
+                            # Kline: [startTime, open, high, low, close, volume, turnover]
+                            # Bybit returns NEWEST first, so we reverse later or insert as is
+                            ts = int(k[0])
+                            o = float(k[1])
+                            h = float(k[2])
+                            l = float(k[3])
+                            c = float(k[4])
+                            v = float(k[5])
+                            db.save_kline(symbol, "1", o, h, l, c, v, ts)
+
+                        # Reload from DB to ensure consistency and correct sorting
+                        df = pd.read_sql(query, db.engine)
+
                 if df.empty:
-                    logger.warning("warmup_no_data", symbol=symbol)
+                    logger.warning("warmup_no_data_after_fetch", symbol=symbol)
                     continue
 
                 # Sort back to ascending (oldest first)
@@ -72,6 +99,9 @@ class StrategyEngine:
                             # during warmup. However, strategies usually return a Signal object.
                             # We can simply IGNORE the returned signal during warmup.
                             await strategy.on_market_data(event)
+
+            if client:
+                await client.close()
 
         except Exception as e:
             logger.error("warmup_failed", error=str(e))
