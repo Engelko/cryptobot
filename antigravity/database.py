@@ -89,6 +89,38 @@ class Database:
         finally:
             session.close()
 
+    def get_risk_state(self):
+        session = self.Session()
+        try:
+            # Singleton state, id=1
+            state = session.query(DBRiskState).filter_by(id=1).first()
+            if state:
+                return {"daily_loss": state.daily_loss, "last_reset_date": state.last_reset_date}
+            return None
+        except Exception as e:
+            logger.error("db_get_risk_state_failed", error=str(e))
+            return None
+        finally:
+            session.close()
+
+    def update_risk_state(self, daily_loss, last_reset_date):
+        session = self.Session()
+        try:
+            state = session.query(DBRiskState).filter_by(id=1).first()
+            if not state:
+                state = DBRiskState(id=1, daily_loss=daily_loss, last_reset_date=last_reset_date, updated_at=datetime.now())
+                session.add(state)
+            else:
+                state.daily_loss = daily_loss
+                state.last_reset_date = last_reset_date
+                state.updated_at = datetime.now()
+            session.commit()
+        except Exception as e:
+            logger.error("db_update_risk_state_failed", error=str(e))
+            session.rollback()
+        finally:
+            session.close()
+
     def save_signal(self, strategy, symbol, type_, price, reason):
         session = self.Session()
         try:

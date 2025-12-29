@@ -1,8 +1,11 @@
+from datetime import datetime, timezone
 from antigravity.config import settings
 from antigravity.strategy import Signal, SignalType
 from antigravity.logging import get_logger
 from antigravity.client import BybitClient
 from antigravity.execution import execution_manager
+from antigravity.database import db
+from antigravity.event import event_bus, TradeClosedEvent, on_event
 
 logger = get_logger("risk_manager")
 
@@ -14,12 +17,44 @@ class RiskManager:
         self.max_daily_loss = settings.MAX_DAILY_LOSS
         self.max_position_size = settings.MAX_POSITION_SIZE
         self.current_daily_loss = 0.0
+        self.last_reset_date = None
+
+        # Load persisted state
+        state = db.get_risk_state()
+        if state:
+            self.current_daily_loss = state["daily_loss"]
+            self.last_reset_date = state["last_reset_date"]
+
+        # Subscribe to trade closed events
+        event_bus.subscribe(TradeClosedEvent, self._handle_trade_closed)
+
+    def _get_current_utc_date(self) -> str:
+        """Returns current UTC date in YYYY-MM-DD format."""
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def _check_reset(self):
+        """Resets daily loss if the date has changed (UTC)."""
+        current_date = self._get_current_utc_date()
+
+        if self.last_reset_date != current_date:
+            logger.info("risk_daily_reset", old_date=self.last_reset_date, new_date=current_date, previous_loss=self.current_daily_loss)
+            self.current_daily_loss = 0.0
+            self.last_reset_date = current_date
+            # Persist reset state
+            db.update_risk_state(self.current_daily_loss, self.last_reset_date)
+
+    async def _handle_trade_closed(self, event: TradeClosedEvent):
+        """Event handler for closed trades."""
+        self.update_metrics(event.pnl)
 
     async def check_signal(self, signal: Signal) -> bool:
         """
         Validate if the signal matches risk parameters.
         Returns True if safe, False if blocked.
         """
+        # 0. Check Reset
+        self._check_reset()
+
         # 1. Check Daily Loss Limit
         if self.current_daily_loss >= self.max_daily_loss:
             logger.warning("risk_block", reason="daily_loss_limit_exceeded", 
@@ -62,12 +97,16 @@ class RiskManager:
         """
         Update risk metrics after a trade closes.
         """
+        # Ensure we are in the correct day bucket before adding loss
+        self._check_reset()
+
         if realized_pnl < 0:
-            self.current_daily_loss += abs(realized_pnl)
-        
-        # Reset if new day (simplistic logic for now)
-        # Real impl would reset at 00:00 UTC
-        pass
+            loss = abs(realized_pnl)
+            self.current_daily_loss += loss
+            logger.info("risk_loss_updated", added_loss=loss, total_daily_loss=self.current_daily_loss)
+
+            # Persist new loss state
+            db.update_risk_state(self.current_daily_loss, self.last_reset_date)
 
     async def _get_available_balance(self) -> float:
         """
