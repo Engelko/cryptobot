@@ -23,9 +23,13 @@ async def verify_real_execution():
     client = BybitClient()
     current_price = 50000.0 # Fallback
     try:
-        tickers = await client.get_tickers(category="linear", symbol="BTCUSDT")
-        if tickers and "list" in tickers and len(tickers["list"]) > 0:
-            current_price = float(tickers["list"][0]["lastPrice"])
+        # Use get_kline instead of get_tickers since get_tickers is not implemented
+        # Fetch 1 candle (limit=1) for 1-minute interval
+        kline = await client.get_kline(symbol="BTCUSDT", interval="1", limit=1)
+        if kline and len(kline) > 0:
+            # Kline format: [startTime, open, high, low, close, volume, turnover]
+            # We use 'close' price (index 4)
+            current_price = float(kline[0][4])
             print(f"Current BTC Price: {current_price}")
         else:
             print("Failed to fetch price, using fallback.")
