@@ -46,21 +46,27 @@ def configure_logging():
     handler.setFormatter(formatter)
 
     # File Handler for Dashboard visibility
-    file_handler = logging.FileHandler("storage/antigravity.log")
+    try:
+        file_handler = logging.FileHandler("storage/antigravity.log")
 
-    # Use a plain renderer (no colors) for the file handler to ensure readability in dashboard
-    file_formatter = structlog.stdlib.ProcessorFormatter(
-        foreign_pre_chain=shared_processors,
-        processors=[
-            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            structlog.dev.ConsoleRenderer(colors=False),
-        ],
-    )
-    file_handler.setFormatter(file_formatter)
+        # Use a plain renderer (no colors) for the file handler to ensure readability in dashboard
+        file_formatter = structlog.stdlib.ProcessorFormatter(
+            foreign_pre_chain=shared_processors,
+            processors=[
+                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                structlog.dev.ConsoleRenderer(colors=False),
+            ],
+        )
+        file_handler.setFormatter(file_formatter)
+
+        logging.getLogger().addHandler(file_handler)
+    except PermissionError:
+        sys.stderr.write("WARNING: Could not open storage/antigravity.log for writing. Logging to console only.\n")
+    except Exception as e:
+        sys.stderr.write(f"WARNING: Failed to setup file logging: {e}\n")
 
     root_logger = logging.getLogger()
     root_logger.addHandler(handler)
-    root_logger.addHandler(file_handler)
     root_logger.setLevel(settings.LOG_LEVEL)
 
     logging.getLogger("asyncio").setLevel(logging.WARNING)

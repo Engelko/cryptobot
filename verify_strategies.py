@@ -4,6 +4,7 @@ from antigravity.engine import strategy_engine
 from antigravity.event import event_bus, KlineEvent
 from antigravity.logging import configure_logging
 from antigravity.strategies.rsi import RSIStrategy
+from antigravity.client import BybitClient
 
 async def main():
     configure_logging()
@@ -16,12 +17,24 @@ async def main():
     await strategy_engine.start()
     
     print("X-Testing RSI Strategy (Extended Data)...")
+
+    # 1. Fetch Real Price to avoid "Price Band" errors (30208)
+    client = BybitClient()
+    base_price = 50000.0 # Fallback
+    try:
+        klines = await client.get_kline(symbol="BTCUSDT", interval="1", limit=1)
+        if klines:
+            base_price = float(klines[0][4]) # Close price
+            print(f"Fetched Real Price: {base_price}")
+    except Exception as e:
+        print(f"Failed to fetch real price, using fallback: {e}")
+    finally:
+        await client.close()
     
     # Generate 50 candles
-    base_price = 50000.0
     for i in range(50):
         price = base_price + (i * 100)
-        # Spike at the end
+        # Spike at the end to trigger RSI
         if i >= 45:
              price = base_price + (i * 800) 
              
