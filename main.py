@@ -13,6 +13,7 @@ logger = get_logger("main")
 
 # Global reference to keep the websocket client alive
 ws_client = None
+ws_task = None
 
 async def shutdown(signal, loop):
     """Cleanup tasks tied to the service's shutdown."""
@@ -20,6 +21,9 @@ async def shutdown(signal, loop):
     
     if ws_client:
         await ws_client.close()
+
+    if ws_task and not ws_task.done():
+        ws_task.cancel()
 
     await strategy_engine.stop()
     await event_bus.stop()
@@ -62,13 +66,23 @@ async def main():
     # Checking copilot.py: it has async start/stop methods. Good.
 
     # Start WebSocket Data Feed
-    global ws_client
+    global ws_client, ws_task
     ws_client = BybitWebSocket()
 
     # Subscribe to 1-minute candles for all symbols
     topics = [f"kline.1.{s}" for s in symbols]
     # Note: connect() runs a loop, so we must run it as a task
-    asyncio.create_task(ws_client.connect(topics))
+    ws_task = asyncio.create_task(ws_client.connect(topics))
+
+    def _ws_done_callback(t):
+        try:
+            t.result()
+        except asyncio.CancelledError:
+            logger.info("ws_task_cancelled")
+        except Exception as e:
+            logger.error("ws_task_failed", error=str(e))
+
+    ws_task.add_done_callback(_ws_done_callback)
 
     logger.info("system_online", engine="active", strategies=active_strategies, symbols=symbols)
 
