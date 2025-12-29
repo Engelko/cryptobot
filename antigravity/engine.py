@@ -7,6 +7,7 @@ from antigravity.risk import RiskManager
 from antigravity.database import db
 from antigravity.execution import execution_manager
 from antigravity.ml_engine import ml_engine
+import pandas as pd
 
 logger = get_logger("strategy_engine")
 
@@ -21,9 +22,69 @@ class StrategyEngine:
         self.strategies[strategy.name] = strategy
         logger.info("strategy_registered", name=strategy.name, symbols=strategy.symbols)
 
+    async def _warmup_strategies(self):
+        """
+        Load historical klines from the database and feed them to strategies
+        to pre-calculate indicators (RSI, MACD) so they are ready to trade immediately.
+        """
+        logger.info("warmup_started")
+        try:
+            # Gather all unique symbols from registered strategies
+            all_symbols = set()
+            for strategy in self.strategies.values():
+                all_symbols.update(strategy.symbols)
+
+            # Create a DB engine for pandas (if not already available in db, but db instance uses sqlalchemy session)
+            # We can use db.engine which is exposed in Database class
+
+            for symbol in all_symbols:
+                # Load last 300 klines (enough for RSI 14 and MACD 26+9+slack)
+                # Using direct pandas read for efficiency
+                query = f"SELECT * FROM klines WHERE symbol='{symbol}' ORDER BY ts DESC LIMIT 300"
+                df = pd.read_sql(query, db.engine)
+
+                if df.empty:
+                    logger.warning("warmup_no_data", symbol=symbol)
+                    continue
+
+                # Sort back to ascending (oldest first)
+                df = df.sort_values("ts")
+
+                logger.info("warmup_symbol", symbol=symbol, candles=len(df))
+
+                # Feed to strategies
+                for _, row in df.iterrows():
+                    event = KlineEvent(
+                        symbol=symbol,
+                        interval=row["interval"],
+                        open=row["open"],
+                        high=row["high"],
+                        low=row["low"],
+                        close=row["close"],
+                        volume=row["volume"],
+                        timestamp=row["ts"]
+                    )
+
+                    # Feed to ALL strategies that watch this symbol
+                    for strategy in self.strategies.values():
+                        if symbol in strategy.symbols and strategy.is_active:
+                            # We call on_market_data but normally we don't want to trigger TRADES on historical data
+                            # during warmup. However, strategies usually return a Signal object.
+                            # We can simply IGNORE the returned signal during warmup.
+                            await strategy.on_market_data(event)
+
+        except Exception as e:
+            logger.error("warmup_failed", error=str(e))
+
+        logger.info("warmup_complete")
+
     async def start(self):
         self._running = True
         logger.info("strategy_engine_started")
+
+        # Perform Warmup
+        await self._warmup_strategies()
+
         if self.ml_engine.enabled:
              logger.info("ml_engine_active")
         
