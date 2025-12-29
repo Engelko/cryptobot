@@ -54,6 +54,15 @@ class DBTrade(Base):
     execution_type = Column(String) # REAL / PAPER
     created_at = Column(DateTime, default=datetime.now)
 
+class DBPrediction(Base):
+    __tablename__ = 'predictions'
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String)
+    prediction_value = Column(Float)
+    confidence = Column(Float)
+    features = Column(Text)
+    created_at = Column(DateTime, default=datetime.now)
+
 class DBRiskState(Base):
     __tablename__ = 'risk_state'
     id = Column(Integer, primary_key=True)
@@ -143,6 +152,48 @@ class Database:
             session.commit()
         except Exception as e:
             logger.error("db_save_trade_failed", error=str(e), symbol=symbol, strategy=strat)
+            session.rollback()
+        finally:
+            session.close()
+
+    def get_risk_state(self):
+        session = self.Session()
+        try:
+            return session.query(DBRiskState).first()
+        except Exception:
+            return None
+        finally:
+            session.close()
+
+    def save_risk_state(self, daily_loss, last_reset_date):
+        session = self.Session()
+        try:
+            state = session.query(DBRiskState).first()
+            if not state:
+                state = DBRiskState()
+                session.add(state)
+
+            state.daily_loss = daily_loss
+            state.last_reset_date = last_reset_date
+            state.updated_at = datetime.now()
+            session.commit()
+        except Exception as e:
+            logger.error("db_save_risk_state_failed", error=str(e))
+            session.rollback()
+        finally:
+            session.close()
+
+    def save_prediction(self, symbol, prediction_value, confidence, features=None):
+        session = self.Session()
+        try:
+            if features and isinstance(features, (dict, list)):
+                features = json.dumps(features)
+
+            p = DBPrediction(symbol=symbol, prediction_value=prediction_value, confidence=confidence, features=features)
+            session.add(p)
+            session.commit()
+        except Exception as e:
+            logger.error("db_save_prediction_failed", error=str(e), symbol=symbol)
             session.rollback()
         finally:
             session.close()
