@@ -67,7 +67,14 @@ async def verify_real_execution():
 
     # 3.5 Save Signal to Database (So it appears in Dashboard)
     try:
-        db.save_signal(test_signal)
+        # Signature: save_signal(self, strategy, symbol, type_, price, reason)
+        db.save_signal(
+            "Manual_Check",
+            test_signal.symbol,
+            test_signal.type.value,
+            test_signal.price,
+            test_signal.reason
+        )
         print("✅ Signal saved to database (Visible in Dashboard > Signals)")
     except Exception as e:
         print(f"❌ Failed to save signal to DB: {e}")
