@@ -63,6 +63,13 @@ class DBPrediction(Base):
     features = Column(Text)
     created_at = Column(DateTime, default=datetime.now)
 
+class DBRiskState(Base):
+    __tablename__ = 'risk_state'
+    id = Column(Integer, primary_key=True)
+    daily_loss = Column(Float, default=0.0)
+    last_reset_date = Column(String) # YYYY-MM-DD
+    updated_at = Column(DateTime, default=datetime.now)
+
 class Database:
     def __init__(self, db_path=None):
         if db_path is None:
