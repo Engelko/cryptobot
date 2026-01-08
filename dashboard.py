@@ -7,6 +7,7 @@ import asyncio
 import os
 import json
 import logging
+import yaml
 from antigravity.config import settings
 from antigravity.client import BybitClient
 from antigravity.logging import configure_logging
@@ -21,6 +22,26 @@ for h in logging.getLogger().handlers:
 
 if not has_file_handler:
     configure_logging()
+
+# --- Helper Functions ---
+def load_strategies_config(filepath="strategies.yaml"):
+    if not os.path.exists(filepath):
+        return {}
+    try:
+        with open(filepath, "r") as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        logging.getLogger("dashboard").error(f"Failed to load strategies.yaml: {e}")
+        return {}
+
+def save_strategies_config(config, filepath="strategies.yaml"):
+    try:
+        with open(filepath, "w") as f:
+            yaml.dump(config, f, default_flow_style=False)
+        return True
+    except Exception as e:
+        logging.getLogger("dashboard").error(f"Failed to save strategies.yaml: {e}")
+        return False
 
 # Database Connection
 db_path = settings.DATABASE_URL
@@ -274,6 +295,10 @@ with tab6:
     st.subheader("Settings Configuration")
     st.info("Note: Changes require an application restart to take effect.")
 
+    # Load YAML Configuration
+    yaml_config = load_strategies_config()
+    strategies_config = yaml_config.get("strategies", {})
+
     with st.form("config_form"):
         # Trading Symbols
         # Convert list to comma-separated string for editing
@@ -285,18 +310,39 @@ with tab6:
 
         new_symbols_str = st.text_input("Trading Symbols (comma separated)", value=current_symbols_str)
 
-        # Active Strategies
-        available_strategies = ["MACD_Trend", "RSI_Reversion"]
-        current_strategies = settings.ACTIVE_STRATEGIES
-        if not isinstance(current_strategies, list):
-             current_strategies = [current_strategies]
+        st.divider()
+        st.markdown("### Strategy Configuration (New Architecture)")
 
-        # Ensure current strategies are in available list to avoid UI errors
-        default_strategies = [s for s in current_strategies if s in available_strategies]
+        # Dynamic Strategy Controls
+        updated_strategies = {}
 
-        new_strategies = st.multiselect("Active Strategies", options=available_strategies, default=default_strategies)
+        # Define pretty names or use keys
+        for strat_key, strat_conf in strategies_config.items():
+            st.markdown(f"**{strat_conf.get('name', strat_key.title())}**")
+            col_en, col_p = st.columns([1, 3])
+
+            with col_en:
+                is_enabled = st.checkbox("Enabled", value=strat_conf.get("enabled", False), key=f"en_{strat_key}")
+                strat_conf["enabled"] = is_enabled
+
+            # Special Handling for Grid
+            if strat_key == "grid" and is_enabled:
+                with st.expander("Grid Parameters", expanded=True):
+                    g_lower = st.number_input("Lower Price", value=float(strat_conf.get("lower_price", 0.0)), key="g_low")
+                    g_upper = st.number_input("Upper Price", value=float(strat_conf.get("upper_price", 0.0)), key="g_high")
+                    g_levels = st.number_input("Grid Levels", value=int(strat_conf.get("grid_levels", 10)), key="g_lvl")
+                    g_amt = st.number_input("Amount per Grid", value=float(strat_conf.get("amount_per_grid", 0.001)), format="%.4f", key="g_amt")
+
+                    strat_conf["lower_price"] = g_lower
+                    strat_conf["upper_price"] = g_upper
+                    strat_conf["grid_levels"] = g_levels
+                    strat_conf["amount_per_grid"] = g_amt
+
+            updated_strategies[strat_key] = strat_conf
+            st.divider()
 
         # Risk Management
+        st.markdown("### Global Risk Management")
         new_max_daily_loss = st.number_input("Max Daily Loss (USDT)", value=float(settings.MAX_DAILY_LOSS))
         new_max_position_size = st.number_input("Max Position Size (USDT)", value=float(settings.MAX_POSITION_SIZE))
 
@@ -304,25 +350,23 @@ with tab6:
 
         if submitted:
             try:
-                # Update .env file
+                # 1. Update .env file (Symbols & Risk)
                 env_path = ".env"
                 if not os.path.exists(env_path):
                     with open(env_path, "w") as f:
                         f.write("")
 
-                # Read lines
                 with open(env_path, "r") as f:
                     lines = f.readlines()
 
                 config_map = {
-                    "TRADING_SYMBOLS": f'"{new_symbols_str}"', # Wrap in quotes
-                    "ACTIVE_STRATEGIES": json.dumps(new_strategies),
+                    "TRADING_SYMBOLS": f'"{new_symbols_str}"',
                     "MAX_DAILY_LOSS": str(new_max_daily_loss),
                     "MAX_POSITION_SIZE": str(new_max_position_size)
+                    # Note: We no longer update ACTIVE_STRATEGIES in .env as YAML takes precedence
                 }
 
                 new_lines = []
-                # Update existing keys
                 for line in lines:
                     key = line.split("=")[0].strip()
                     if key in config_map:
@@ -331,14 +375,18 @@ with tab6:
                     else:
                         new_lines.append(line)
 
-                # Append new keys
                 for key, val in config_map.items():
                     new_lines.append(f"{key}={val}\n")
 
                 with open(env_path, "w") as f:
                     f.writelines(new_lines)
 
-                st.success("Configuration saved! Please restart the application.")
+                # 2. Update strategies.yaml
+                yaml_config["strategies"] = updated_strategies
+                if save_strategies_config(yaml_config):
+                    st.success("Configuration saved! Please restart the application.")
+                else:
+                    st.warning("Saved .env but failed to save strategies.yaml.")
 
             except Exception as e:
                 st.error(f"Failed to save configuration: {e}")
