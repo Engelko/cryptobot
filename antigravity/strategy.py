@@ -27,6 +27,8 @@ class BaseStrategy(ABC):
         self.symbols = symbols
         self.is_active = False
         self.state: Dict[str, Dict[str, Any]] = {s: {} for s in symbols}
+        self.ticks_processed = 0
+        self.last_indicator_status = "N/A"
 
     async def start(self):
         self.is_active = True
