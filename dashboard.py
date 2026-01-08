@@ -277,12 +277,22 @@ with tab4:
 
 with tab5:
     st.subheader("System Health")
+
+    # Load real active strategies from YAML
+    sys_yaml_config = load_strategies_config()
+    sys_strategies_config = sys_yaml_config.get("strategies", {})
+    active_strategies_list = [
+        conf.get("name", key)
+        for key, conf in sys_strategies_config.items()
+        if conf.get("enabled", False)
+    ]
+
     st.json({
         "Status": "Online",
         "Mode": "Simulation (Paper)" if settings.SIMULATION_MODE else "Live Trading",
         "Risk Manager": "Active",
         "Database": "Connected",
-        "Active Strategies": settings.ACTIVE_STRATEGIES,
+        "Active Strategies": active_strategies_list,
         "Environment": settings.ENVIRONMENT
     })
 
@@ -326,7 +336,7 @@ with tab6:
                 strat_conf["enabled"] = is_enabled
 
             # Special Handling for Grid
-            if strat_key == "grid" and is_enabled:
+            if strat_key == "grid":
                 with st.expander("Grid Parameters", expanded=True):
                     g_lower = st.number_input("Lower Price", value=float(strat_conf.get("lower_price", 0.0)), key="g_low")
                     g_upper = st.number_input("Upper Price", value=float(strat_conf.get("upper_price", 0.0)), key="g_high")
@@ -421,6 +431,27 @@ with tab7:
         *   **Buy Signal:** When RSI drops below 30 (Oversold), indicating the price might bounce back up.
         *   **Sell Signal:** When RSI rises above 70 (Overbought), indicating the price might drop.
         *   **Purpose:** Captures potential reversals in price.
+
+    *   **Volatility Breakout (ATR):**
+        *   **Logic:** Uses Average True Range (ATR) to detect explosive price movements.
+        *   **Signal:** Enters when price breaks out of a defined range by a multiple of the ATR.
+        *   **Purpose:** Catching strong breakout trends early.
+
+    *   **Scalping (Stochastic):**
+        *   **Logic:** High-frequency trading based on overbought/oversold conditions in short timeframes.
+        *   **Signal:** Uses Stochastic Oscillator (K% and D% lines) to find quick entry/exit points.
+        *   **Purpose:** Profiting from small price changes in ranging markets.
+
+    *   **BB Squeeze (Volatility):**
+        *   **Logic:** Identifies periods of low volatility (squeeze) followed by high volatility (expansion).
+        *   **Signal:** Bollinger Bands narrow inside Keltner Channels, then expand.
+        *   **Purpose:** Positioning for a major move after a quiet period.
+
+    *   **Grid Trading (Range):**
+        *   **Logic:** Places a mesh of Buy and Sell limit orders within a defined price range.
+        *   **Strategy:** Buys low and sells high automatically as price oscillates.
+        *   **Configuration:** Set 'Lower Price' and 'Upper Price' in Settings to define the playing field.
+        *   **Purpose:** Passive income in sideways/choppy markets.
 
     **4. Portfolio & Signals**
     *   **Live Portfolio (Bybit):** This tab shows real-time data from your Bybit account (Wallet Balance, Positions, Orders, History). If you see "API Key not found", configure it in the Settings or .env file.
