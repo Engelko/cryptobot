@@ -195,32 +195,6 @@ class Database:
         finally:
             session.close()
 
-    def get_risk_state(self):
-        session = self.Session()
-        try:
-            return session.query(DBRiskState).first()
-        except Exception:
-            return None
-        finally:
-            session.close()
-
-    def save_risk_state(self, daily_loss, last_reset_date):
-        session = self.Session()
-        try:
-            state = session.query(DBRiskState).first()
-            if not state:
-                state = DBRiskState()
-                session.add(state)
-
-            state.daily_loss = daily_loss
-            state.last_reset_date = last_reset_date
-            state.updated_at = datetime.now()
-            session.commit()
-        except Exception as e:
-            logger.error("db_save_risk_state_failed", error=str(e))
-            session.rollback()
-        finally:
-            session.close()
 
     def save_prediction(self, symbol, prediction_value, confidence, features=None):
         session = self.Session()

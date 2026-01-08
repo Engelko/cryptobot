@@ -31,7 +31,7 @@ class BybitClient:
         if self._session:
             await self._session.close()
 
-    async def _request(self, method: str, endpoint: str, payload: Dict[str, Any] = None) -> Any:
+    async def _request(self, method: str, endpoint: str, payload: Dict[str, Any] = None, suppress_error_log: bool = False) -> Any:
         session = await self._get_session()
         
         # Prepare Payload
@@ -62,7 +62,8 @@ class BybitClient:
                     raise APIError(f"Invalid JSON: {text}", -1, response.status)
                 
                 if data.get("retCode") != 0:
-                     logger.error("api_error", ret_code=data.get("retCode"), ret_msg=data.get("retMsg"))
+                     if not suppress_error_log:
+                        logger.error("api_error", ret_code=data.get("retCode"), ret_msg=data.get("retMsg"))
                      raise APIError(data.get("retMsg"), data.get("retCode"), response.status)
                 
                 return data.get("result")
@@ -117,7 +118,8 @@ class BybitClient:
         # 1. Try UNIFIED
         try:
             params = {"accountType": "UNIFIED", "coin": coin}
-            res = await self._request("GET", endpoint, params)
+            # Suppress errors (like 10001) during probing
+            res = await self._request("GET", endpoint, params, suppress_error_log=True)
             if res and "list" in res and len(res["list"]) > 0:
                  return res["list"][0]
         except Exception as e:
@@ -126,7 +128,8 @@ class BybitClient:
         # 2. Try CONTRACT (Standard Account)
         try:
             params = {"accountType": "CONTRACT", "coin": coin}
-            res = await self._request("GET", endpoint, params)
+            # Suppress errors during probing
+            res = await self._request("GET", endpoint, params, suppress_error_log=True)
             if res and "list" in res and len(res["list"]) > 0:
                  return res["list"][0]
         except Exception as e:
