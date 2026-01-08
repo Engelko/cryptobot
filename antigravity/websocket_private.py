@@ -24,7 +24,10 @@ class BybitPrivateWebSocket:
 
     async def connect(self):
         """Connect to Private WS, Authenticate, and Subscribe."""
-        self._session = aiohttp.ClientSession()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        self._session = aiohttp.ClientSession(headers=headers)
         self._running = True
 
         while self._running:
