@@ -70,6 +70,14 @@ class DBRiskState(Base):
     last_reset_date = Column(String) # YYYY-MM-DD
     updated_at = Column(DateTime, default=datetime.now)
 
+class DBStrategyState(Base):
+    __tablename__ = 'strategy_state'
+    id = Column(Integer, primary_key=True)
+    strategy = Column(String)
+    symbol = Column(String)
+    state_json = Column(Text)
+    updated_at = Column(DateTime, default=datetime.now)
+
 class Database:
     def __init__(self, db_path=None):
         if db_path is None:
@@ -85,6 +93,37 @@ class Database:
             session.add(k)
             session.commit()
         except Exception as e:
+            session.rollback()
+        finally:
+            session.close()
+
+    def get_strategy_state(self, strategy: str, symbol: str) -> dict:
+        session = self.Session()
+        try:
+            state = session.query(DBStrategyState).filter_by(strategy=strategy, symbol=symbol).first()
+            if state and state.state_json:
+                return json.loads(state.state_json)
+            return {}
+        except Exception as e:
+            logger.error("db_get_strategy_state_failed", error=str(e), strategy=strategy)
+            return {}
+        finally:
+            session.close()
+
+    def save_strategy_state(self, strategy: str, symbol: str, state: dict):
+        session = self.Session()
+        try:
+            json_str = json.dumps(state)
+            record = session.query(DBStrategyState).filter_by(strategy=strategy, symbol=symbol).first()
+            if not record:
+                record = DBStrategyState(strategy=strategy, symbol=symbol, state_json=json_str)
+                session.add(record)
+            else:
+                record.state_json = json_str
+                record.updated_at = datetime.now()
+            session.commit()
+        except Exception as e:
+            logger.error("db_save_strategy_state_failed", error=str(e), strategy=strategy)
             session.rollback()
         finally:
             session.close()

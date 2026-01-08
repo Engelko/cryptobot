@@ -7,3 +7,5 @@ ta
 streamlit
 plotly
 sqlalchemy
+PyYAML
+pydantic-settings
