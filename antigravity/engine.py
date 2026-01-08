@@ -1,7 +1,7 @@
 import asyncio
 from typing import Dict, List
 from antigravity.logging import get_logger
-from antigravity.event import event_bus, MarketDataEvent, KlineEvent, on_event, SentimentEvent
+from antigravity.event import event_bus, MarketDataEvent, KlineEvent, OrderUpdateEvent, on_event, SentimentEvent
 from antigravity.strategy import AbstractStrategy, Signal
 from antigravity.risk import RiskManager
 from antigravity.database import db
@@ -121,6 +121,7 @@ class StrategyEngine:
         # Subscribe to Events
         event_bus.subscribe(MarketDataEvent, self._handle_market_data)
         event_bus.subscribe(KlineEvent, self._handle_market_data)
+        event_bus.subscribe(OrderUpdateEvent, self._handle_order_update)
         event_bus.subscribe(SentimentEvent, self._handle_sentiment)
 
     async def stop(self):
@@ -169,6 +170,23 @@ class StrategyEngine:
                     await self._handle_signal(signal, strategy.name)
             except Exception as e:
                 logger.error("strategy_error", strategy=name, error=str(e))
+
+    async def _handle_order_update(self, event: OrderUpdateEvent):
+        """Route order updates (fills) to strategies."""
+        if not self._running:
+            return
+
+        for name, strategy in self.strategies.items():
+            if not strategy.is_active:
+                continue
+
+            # Optimization: Only send if symbol matches?
+            # Strategy checks symbol internally usually, but we can filter here.
+            if event.symbol in strategy.symbols:
+                try:
+                    await strategy.on_order_update(event)
+                except Exception as e:
+                    logger.error("strategy_order_update_failed", strategy=name, error=str(e))
 
     async def _handle_sentiment(self, event: SentimentEvent):
         db.save_sentiment("BTCUSDT", event.score, event.reasoning, event.model)

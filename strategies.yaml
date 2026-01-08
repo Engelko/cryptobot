@@ -1,0 +1,50 @@
+strategies:
+  trend_following:
+    enabled: true
+    name: "GoldenCross"
+    fast_period: 50
+    slow_period: 200
+    risk_per_trade: 0.02
+
+  mean_reversion:
+    enabled: true
+    name: "BollingerRSI"
+    rsi_period: 14
+    rsi_overbought: 70
+    rsi_oversold: 30
+    bb_period: 20
+    bb_std: 2.0
+    risk_per_trade: 0.02
+
+  volatility_breakout:
+    enabled: false
+    name: "ATRBreakout"
+    atr_period: 14
+    multiplier: 3.0
+    risk_per_trade: 0.02
+
+  scalping:
+    enabled: false
+    name: "StochScalp"
+    k_period: 14
+    d_period: 3
+    overbought: 80
+    oversold: 20
+    risk_per_trade: 0.01
+
+  bb_squeeze:
+    enabled: false
+    name: "BBSqueeze"
+    bb_period: 20
+    bb_std: 2.0
+    keltner_multiplier: 1.5
+    momentum_period: 12
+    risk_per_trade: 0.02
+
+  grid:
+    enabled: false
+    name: "GridMaster"
+    lower_price: 40000.0
+    upper_price: 50000.0
+    grid_levels: 10
+    amount_per_grid: 0.001
