@@ -22,8 +22,13 @@ class RiskManager:
         # Load persisted state
         state = db.get_risk_state()
         if state:
-            self.current_daily_loss = state["daily_loss"]
-            self.last_reset_date = state["last_reset_date"]
+            # Handle SQLAlchemy object or dict
+            if hasattr(state, "daily_loss"):
+                self.current_daily_loss = state.daily_loss
+                self.last_reset_date = state.last_reset_date
+            else:
+                self.current_daily_loss = state["daily_loss"]
+                self.last_reset_date = state["last_reset_date"]
 
         # Subscribe to trade closed events
         event_bus.subscribe(TradeClosedEvent, self._handle_trade_closed)

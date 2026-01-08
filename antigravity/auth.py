@@ -6,7 +6,7 @@ from typing import Dict, Any
 
 class Authentication:
     @staticmethod
-    def generate_signature(api_key: str, api_secret: str, payload: str, recv_window: int = 5000) -> Dict[str, str]:
+    def generate_signature(api_key: str, api_secret: str, payload: str, recv_window: int = 20000) -> Dict[str, str]:
         """
         Generate headers for Bybit v5 API.
         Payload should be the query string for GET or JSON body string for POST.
