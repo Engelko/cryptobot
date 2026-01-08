@@ -112,6 +112,14 @@ class StrategyEngine:
         self._running = True
         logger.info("strategy_engine_started")
 
+        # Start all strategies
+        for name, strategy in self.strategies.items():
+            try:
+                await strategy.start()
+                logger.info("strategy_started", strategy=name)
+            except Exception as e:
+                logger.error("strategy_start_failed", strategy=name, error=str(e))
+
         # Perform Warmup
         await self._warmup_strategies()
 
@@ -126,6 +134,15 @@ class StrategyEngine:
 
     async def stop(self):
         self._running = False
+
+        # Stop all strategies
+        for name, strategy in self.strategies.items():
+            try:
+                await strategy.stop()
+                logger.info("strategy_stopped", strategy=name)
+            except Exception as e:
+                logger.error("strategy_stop_failed", strategy=name, error=str(e))
+
         logger.info("strategy_engine_stopped")
 
     async def _handle_market_data(self, event: MarketDataEvent):

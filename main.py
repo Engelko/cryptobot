@@ -116,6 +116,10 @@ async def main():
 
     logger.info("system_online", engine="active", symbols=symbols)
 
+    # Log Registered Strategies
+    active_names = [name for name, s in strategy_engine.strategies.items() if s.is_active]
+    logger.info("active_strategies_list", strategies=active_names)
+
     # Keep alive
     try:
         # Create an event that waits forever (or until signal)

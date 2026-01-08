@@ -4,6 +4,9 @@ from typing import Optional, List
 from antigravity.strategy import BaseStrategy, Signal, SignalType
 from antigravity.event import MarketDataEvent, KlineEvent
 from antigravity.strategies.config import TrendConfig
+from antigravity.logging import get_logger
+
+logger = get_logger("strategy_trend")
 
 class TrendFollowingStrategy(BaseStrategy):
     def __init__(self, config: TrendConfig, symbols: List[str]):
@@ -24,6 +27,13 @@ class TrendFollowingStrategy(BaseStrategy):
 
             if len(self.klines[event.symbol]) > self.min_klines + 100:
                 self.klines[event.symbol].pop(0)
+
+            # Telemetry (move to on_market_data to see early heartbeat)
+            self.ticks_processed += 1
+            if self.ticks_processed % 2 == 0:
+                count = len(self.klines[event.symbol])
+                status = f"Collecting Data {count}/{self.min_klines}" if count < self.min_klines else self.last_indicator_status
+                logger.info("strategy_heartbeat", name=self.name, symbol=event.symbol, status=status)
 
             return self._calculate_signal(event.symbol)
         return None
@@ -52,5 +62,8 @@ class TrendFollowingStrategy(BaseStrategy):
         # Death Cross (Fast crosses below Slow)
         if prev["fast_sma"] >= prev["slow_sma"] and curr["fast_sma"] < curr["slow_sma"]:
             return Signal(SignalType.SELL, symbol, curr["close"], reason="Death Cross")
+
+        # Telemetry
+        self.last_indicator_status = f"Fast={curr['fast_sma']:.2f} Slow={curr['slow_sma']:.2f}"
 
         return None

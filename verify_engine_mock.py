@@ -16,7 +16,7 @@ async def inject_mock_data():
     # Slow SMA (200) is flat. Fast SMA (50) crosses up.
 
     # Simpler: Just print if strategy receives it.
-    for i in range(5):
+    for i in range(15):
         print(f"Injecting Kline {i}")
         event = KlineEvent(
             symbol=symbol, interval="1",

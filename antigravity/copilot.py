@@ -14,6 +14,11 @@ class AICopilot:
         self._running = False
 
     async def start(self):
+        # Check if API Key is set
+        if not self.client.api_key:
+             logger.warning("ai_copilot_disabled", reason="No LLM_API_KEY set")
+             return
+
         self._running = True
         event_bus.subscribe(KlineEvent, self._handle_kline)
         logger.info("ai_copilot_started")
