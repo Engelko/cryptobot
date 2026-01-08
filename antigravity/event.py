@@ -58,6 +58,18 @@ class TradeClosedEvent(Event):
     strategy: str = ""
     execution_type: str = ""
 
+@dataclass
+class OrderUpdateEvent(Event):
+    """Event for order status updates (Filled, Cancelled, etc)."""
+    symbol: str = ""
+    order_id: str = ""
+    order_status: str = "" # "Filled", "Cancelled", "New"
+    side: str = ""
+    price: float = 0.0
+    qty: float = 0.0
+    filled_qty: float = 0.0
+    timestamp: int = 0
+
 class EventBus:
     """
     Asynchronous Event Bus using asyncio.Queue for decoupling components.
