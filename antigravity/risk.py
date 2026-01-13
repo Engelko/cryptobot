@@ -91,9 +91,12 @@ class RiskManager:
             # Quantity not provided. Strategy relies on Execution logic to size the trade.
             # Execution logic uses min(balance, max_position_size).
             # We must ensure we have at least enough balance for a minimum order (approx $10).
-            if available_balance < MIN_ORDER_COST:
+            executable_size = min(available_balance, self.max_position_size)
+
+            if executable_size < MIN_ORDER_COST:
                 logger.warning("risk_block", reason="insufficient_balance_for_min_order",
-                               available=available_balance, min_required=MIN_ORDER_COST)
+                               available=available_balance, max_pos=self.max_position_size,
+                               executable=executable_size, min_required=MIN_ORDER_COST)
                 return False
 
         return True

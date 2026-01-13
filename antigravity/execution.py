@@ -117,8 +117,15 @@ class RealBroker:
                 qty = trade_size / price
 
                 # Rounding: Bybit requires specific precision.
-                # For safety, we round to 3 decimals. Ideally should fetch instrument info.
-                qty_str = f"{qty:.3f}"
+                # For BTC and high-value coins, we need at least 5 decimal places.
+                # We use .5f to be safer for BTC/ETH, while avoiding too many decimals for low-value coins (which API might reject if too precise? Bybit usually truncates).
+                qty_str = f"{qty:.5f}"
+
+                # Check for zero quantity after formatting
+                if float(qty_str) <= 0:
+                     logger.warning("real_buy_qty_zero", symbol=signal.symbol, qty_raw=qty, qty_formatted=qty_str)
+                     audit.log_event("EXECUTION", f"BUY REJECTED: Qty 0 ({qty_str})", "WARNING")
+                     return
 
                 logger.info("real_placing_buy", symbol=signal.symbol, qty=qty_str, expected_price=price)
 
