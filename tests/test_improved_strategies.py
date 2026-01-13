@@ -55,23 +55,22 @@ class TestBollingerRSIImproved(unittest.TestCase):
         self.assertIsNotNone(signal3)
 
     def test_adx_filter(self):
-        """Проверка фильтра ADX"""
+        """Проверка фильтра ADX (Removed restriction)"""
         current_time = datetime.now().timestamp()
 
-        # ADX < 25 (no trend) — не пройдёт (Assuming logic: High ADX required)
-        # Note: In my implementation, I followed the prompt's `if adx < threshold: return None`.
+        # ADX < 25 (no trend) — SHOULD PASS NOW (Mean Reversion likes sideways)
         signal = self.strategy.generate_signal(
             symbol="BTCUSDT", bb_signal="OVERSOLD", rsi_value=20,
             current_time=current_time, adx_value=15.0
         )
-        self.assertIsNone(signal)
-
-        # ADX > 25 (trend) — пройдёт
-        signal = self.strategy.generate_signal(
-            symbol="BTCUSDT", bb_signal="OVERSOLD", rsi_value=20,
-            current_time=current_time, adx_value=35.0
-        )
         self.assertIsNotNone(signal)
+
+        # ADX > 25 (trend) — SHOULD PASS (No restriction for now)
+        signal2 = self.strategy.generate_signal(
+            symbol="BTCUSDT", bb_signal="OVERSOLD", rsi_value=20,
+            current_time=current_time + 400, adx_value=35.0
+        )
+        self.assertIsNotNone(signal2)
 
 class TestGoldenCrossImproved(unittest.TestCase):
     def setUp(self):

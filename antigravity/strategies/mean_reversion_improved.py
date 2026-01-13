@@ -34,21 +34,11 @@ class BollingerRSIImproved(BaseStrategy):
                 return None
 
         # Filter 2: ADX Trend Check
-        # User prompt logic: "ADX < 25 = sideways market"
-        # However, mean reversion (BollingerRSI) usually works BETTER in sideways markets.
-        # But the prompt says: "Filter based on ADX for GoldenCross...".
-        # AND "Recommendation #1: Cooldown for BollingerRSI".
-        # BUT Developer Step 1 code example shows `BollingerRSIImproved` with `adx_value < self.adx_threshold` check.
-        # Wait, usually Trend strategies need ADX > 25. Mean Reversion needs ADX < 25 (ranging).
-        # The prompt example code for `BollingerRSIImproved` checks `if adx_value < self.adx_threshold: return None`.
-        # This implies it WANTS a trend? That's counter-intuitive for Mean Reversion (RSI/BB).
-        # Let's re-read the prompt example carefully.
-        # "class BollingerRSIImproved... if adx_value < self.adx_threshold: return None".
-        # This means it ONLY trades when ADX is HIGH (Trend).
-        # Bollinger Bands + RSI can be used for trend pullbacks.
-        # I will FOLLOW THE PROMPT CODE EXACTLY, even if it seems odd for a standard mean reversion.
-        if adx_value < self.adx_threshold:
-            return None
+        # Mean Reversion (BollingerRSI) works BEST in Sideways markets (Low ADX).
+        # Previously we required ADX > 25, which killed the strategy in flat markets.
+        # We now ALLOW trading in low ADX. In fact, we might prefer it.
+        # So we REMOVE the filter that blocks low ADX.
+        # If anything, we could filter out High ADX, but for now we just remove the restriction.
 
         signal = None
         if bb_signal == "OVERSOLD" and rsi_value < 30:
