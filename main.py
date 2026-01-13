@@ -10,12 +10,12 @@ from antigravity.strategies.config import load_strategy_config
 from antigravity.config import settings
 
 # Import Strategy Classes
-from antigravity.strategies.trend import TrendFollowingStrategy
-from antigravity.strategies.mean_reversion import MeanReversionStrategy
+from antigravity.strategies.trend_improved import GoldenCrossImproved as TrendFollowingStrategy
+from antigravity.strategies.mean_reversion_improved import BollingerRSIImproved as MeanReversionStrategy
 from antigravity.strategies.volatility import VolatilityBreakoutStrategy
 from antigravity.strategies.scalping import ScalpingStrategy
 from antigravity.strategies.bb_squeeze import BBSqueezeStrategy
-from antigravity.strategies.grid import GridStrategy
+from antigravity.strategies.grid_improved import GridMasterImproved as GridStrategy
 
 logger = get_logger("main")
 
