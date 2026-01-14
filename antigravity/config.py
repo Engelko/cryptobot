@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     LLM_MODEL: str = Field(default="deepseek-chat", description="Model Name")
 
     # Simulation Mode
-    SIMULATION_MODE: bool = Field(True, description="Enable Paper Trading")
+    SIMULATION_MODE: bool = Field(False, description="Enable Paper Trading")
     INITIAL_CAPITAL: float = Field(10000.0, description="Initial Paper Trading Capital (USDT)")
 
     # Machine Learning
