@@ -3,6 +3,7 @@ import ta
 from typing import Optional, List, Dict
 from antigravity.strategy import BaseStrategy, Signal, SignalType
 from antigravity.event import MarketDataEvent, KlineEvent
+from antigravity.strategies.config import MeanReversionConfig
 from antigravity.logging import get_logger
 
 logger = get_logger("strategy_mean_rev_improved")
@@ -11,16 +12,26 @@ class BollingerRSIImproved(BaseStrategy):
     """
     BollingerRSIImproved: Bollinger Bands + RSI with Cooldown and ADX filter.
     """
-    def __init__(self, symbols: List[str], cooldown_seconds: int = 300, adx_threshold: float = 25.0):
-        super().__init__("BollingerRSIImproved", symbols)
-        self.cooldown_seconds = cooldown_seconds
-        self.adx_threshold = adx_threshold
+    def __init__(self, config: MeanReversionConfig, symbols: List[str]):
+        super().__init__(config.name, symbols)
+        self.config = config
+
+        # Load params from config with defaults
+        self.cooldown_seconds = 300 # Not in config, keeping default
+        self.adx_threshold = 25.0 # Not used for filtering, but kept as state
+
+        self.rsi_period = getattr(config, 'rsi_period', 14)
+        self.rsi_overbought = getattr(config, 'rsi_overbought', 70)
+        self.rsi_oversold = getattr(config, 'rsi_oversold', 30)
+        self.bb_period = getattr(config, 'bb_period', 20)
+        self.bb_std = getattr(config, 'bb_std', 2.0)
+
         self.last_signal_time: Dict[str, float] = {} # {symbol: timestamp}
         self.signals_log = []
 
         # Data storage for indicators
         self.klines = {s: [] for s in symbols}
-        self.min_klines = 50 # Enough for BB(20) and ADX(14)
+        self.min_klines = self.bb_period + 30 # Enough for BB
 
     def generate_signal(self, symbol: str, bb_signal: str, rsi_value: float,
                        current_time: float, adx_value: float) -> Optional[dict]:
@@ -33,17 +44,12 @@ class BollingerRSIImproved(BaseStrategy):
             if current_time - self.last_signal_time[symbol] < self.cooldown_seconds:
                 return None
 
-        # Filter 2: ADX Trend Check
-        # Mean Reversion (BollingerRSI) works BEST in Sideways markets (Low ADX).
-        # Previously we required ADX > 25, which killed the strategy in flat markets.
-        # We now ALLOW trading in low ADX. In fact, we might prefer it.
-        # So we REMOVE the filter that blocks low ADX.
-        # If anything, we could filter out High ADX, but for now we just remove the restriction.
+        # Filter 2: ADX Trend Check - Removed/Relaxed as per previous logic
 
         signal = None
-        if bb_signal == "OVERSOLD" and rsi_value < 30:
+        if bb_signal == "OVERSOLD" and rsi_value < self.rsi_oversold:
             signal = {"action": "BUY", "symbol": symbol, "confidence": rsi_value / 100}
-        elif bb_signal == "OVERBOUGHT" and rsi_value > 70:
+        elif bb_signal == "OVERBOUGHT" and rsi_value > self.rsi_overbought:
             signal = {"action": "SELL", "symbol": symbol, "confidence": (100 - rsi_value) / 100}
 
         if signal:
@@ -73,10 +79,10 @@ class BollingerRSIImproved(BaseStrategy):
             df = pd.DataFrame(data)
 
             # Calculate Indicators
-            bb = ta.volatility.BollingerBands(close=df["close"], window=20, window_dev=2.0)
+            bb = ta.volatility.BollingerBands(close=df["close"], window=self.bb_period, window_dev=self.bb_std)
             df["bb_lower"] = bb.bollinger_lband()
             df["bb_upper"] = bb.bollinger_hband()
-            df["rsi"] = ta.momentum.rsi(df["close"], window=14)
+            df["rsi"] = ta.momentum.rsi(df["close"], window=self.rsi_period)
 
             # ADX
             adx_ind = ta.trend.ADXIndicator(high=df["high"], low=df["low"], close=df["close"], window=14)

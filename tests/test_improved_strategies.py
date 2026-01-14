@@ -3,31 +3,44 @@ from datetime import datetime
 from antigravity.strategies.grid_improved import GridMasterImproved
 from antigravity.strategies.mean_reversion_improved import BollingerRSIImproved
 from antigravity.strategies.trend_improved import GoldenCrossImproved
+from antigravity.strategies.config import GridConfig, MeanReversionConfig, TrendConfig
 
 class TestGridMasterImproved(unittest.TestCase):
+    def setUp(self):
+        self.config = GridConfig(name="GridMaster", lower_price=0.0, upper_price=0.0, grid_levels=10, amount_per_grid=0.001)
+
     def test_dynamic_range(self):
-        grid = GridMasterImproved(symbol="BTCUSDT")
-        grid.set_dynamic_range(current_price=91400, atr_value=1200, sigma=2.0)
-        self.assertEqual(grid.lower_price, 91400 - 2400)
-        self.assertEqual(grid.upper_price, 91400 + 2400)
+        grid = GridMasterImproved(self.config, symbols=["BTCUSDT"])
+        grid.set_dynamic_range(symbol="BTCUSDT", current_price=91400, atr_value=1200, sigma=2.0)
+        state = grid.grid_states["BTCUSDT"]
+        self.assertEqual(state["lower"], 91400 - 2400)
+        self.assertEqual(state["upper"], 91400 + 2400)
 
     def test_grid_calculation(self):
-        grid = GridMasterImproved(symbol="BTCUSDT", grid_levels=10)
-        grid.lower_price = 40000
-        grid.upper_price = 50000
-        prices = grid.calculate_grid_prices()
+        config = GridConfig(name="GridMaster", lower_price=40000, upper_price=50000, grid_levels=10, amount_per_grid=0.001)
+        grid = GridMasterImproved(config, symbols=["BTCUSDT"])
+        prices = grid.calculate_grid_prices("BTCUSDT")
         self.assertEqual(len(prices), 11) # 0 to 10
         self.assertEqual(prices[0], 40000)
         self.assertEqual(prices[-1], 50000)
         self.assertAlmostEqual(prices[1], 41000)
 
     def test_validation(self):
+        # We changed crashing to warning for symbols in constructor,
+        # but amount < 0 still crashes
+        config = GridConfig(name="GridMaster", amount_per_grid=-1)
         with self.assertRaises(ValueError):
-            GridMasterImproved(symbol="INVALID_PAIR")
+            GridMasterImproved(config, symbols=["BTCUSDT"])
 
 class TestBollingerRSIImproved(unittest.TestCase):
     def setUp(self):
-        self.strategy = BollingerRSIImproved(symbols=["BTCUSDT"], cooldown_seconds=300)
+        self.config = MeanReversionConfig(name="BollingerRSI", rsi_overbought=70, rsi_oversold=30)
+        self.strategy = BollingerRSIImproved(self.config, symbols=["BTCUSDT"])
+        # Override default cooldown for test predictability if needed,
+        # or stick to defaults. The test relies on cooldown check.
+        # But previous test passed cooldown_seconds to init. Now we can't.
+        # We need to manually set it if we want to test specific timing, or rely on default 300.
+        self.strategy.cooldown_seconds = 300
 
     def test_cooldown_filter(self):
         """Проверка, что cooldown работает"""
@@ -74,7 +87,8 @@ class TestBollingerRSIImproved(unittest.TestCase):
 
 class TestGoldenCrossImproved(unittest.TestCase):
     def setUp(self):
-        self.strategy = GoldenCrossImproved(symbols=["BTCUSDT"])
+        self.config = TrendConfig(name="GoldenCross", fast_period=50, slow_period=200)
+        self.strategy = GoldenCrossImproved(self.config, symbols=["BTCUSDT"])
 
     def test_adx_filter(self):
         # ADX < 25 -> No Signal

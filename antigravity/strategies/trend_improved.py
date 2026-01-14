@@ -3,6 +3,7 @@ import ta
 from typing import Optional, List
 from antigravity.strategy import BaseStrategy, Signal, SignalType
 from antigravity.event import MarketDataEvent, KlineEvent
+from antigravity.strategies.config import TrendConfig
 from antigravity.logging import get_logger
 
 logger = get_logger("strategy_trend_improved")
@@ -11,12 +12,18 @@ class GoldenCrossImproved(BaseStrategy):
     """
     GoldenCrossImproved: Golden Cross with ADX Filter.
     """
-    def __init__(self, symbols: List[str], adx_threshold: float = 25.0):
-        super().__init__("GoldenCrossImproved", symbols)
-        self.adx_threshold = adx_threshold
+    def __init__(self, config: TrendConfig, symbols: List[str]):
+        super().__init__(config.name, symbols)
+        self.config = config
+
+        # Use simple default if not present in config (though TrendConfig should have them)
+        self.fast_period = getattr(config, 'fast_period', 50)
+        self.slow_period = getattr(config, 'slow_period', 200)
+        self.adx_threshold = 25.0 # Could be added to TrendConfig if needed, sticking to default/logic for now
 
         self.klines = {s: [] for s in symbols}
-        self.min_klines = 210 # 200 SMA + buffer
+        # Ensure we have enough data for slow SMA + buffer
+        self.min_klines = self.slow_period + 10
 
     def generate_signal(self, symbol: str, ma_short: float, ma_long: float,
                        current_price: float, adx_value: float) -> Optional[dict]:
@@ -51,45 +58,16 @@ class GoldenCrossImproved(BaseStrategy):
 
             df = pd.DataFrame(data)
 
-            # MA
-            df["fast_sma"] = ta.trend.sma_indicator(df["close"], window=50)
-            df["slow_sma"] = ta.trend.sma_indicator(df["close"], window=200)
+            # MA using Configured Periods
+            df["fast_sma"] = ta.trend.sma_indicator(df["close"], window=self.fast_period)
+            df["slow_sma"] = ta.trend.sma_indicator(df["close"], window=self.slow_period)
 
             # ADX
             adx_ind = ta.trend.ADXIndicator(high=df["high"], low=df["low"], close=df["close"], window=14)
             df["adx"] = adx_ind.adx()
 
             curr = df.iloc[-1]
-            prev = df.iloc[-2] # Current implementation of generate_signal is snapshot-based,
-                               # but Golden Cross is crossover-based.
-                               # Prompt: "if ma_short > ma_long ... return BUY".
-                               # This checks STATE, not CROSSOVER.
-                               # To prevent spamming signals every tick while crossed, we should check previous state?
-                               # The prompt's example code:
-                               # if ma_short > ma_long ... return BUY.
-                               # This implies it returns a signal CONTINUOUSLY while in state?
-                               # That would spam orders.
-                               # Wait, the prompt Rec #2 says "GoldenCross generates signals on sideways market...".
-                               # The example code provided in prompt `generate_signal` is stateless (just checks current values).
-                               # However, standard practice is Crossover.
-                               # I will stick to the prompt's `generate_signal` logic for the method,
-                               # BUT in `on_market_data` I should probably check for the *Cross* event to avoid spam,
-                               # OR rely on the Engine to handle duplicate signals (which it might not).
-                               # Actually, looking at the original `trend.py`:
-                               # `if prev["fast_sma"] <= prev["slow_sma"] and curr["fast_sma"] > curr["slow_sma"]`
-                               # It checks CROSSOVER.
-                               # The prompt's "Improved" code snippet lacks the `prev` check.
-                               # I should probably add the crossover logic to `generate_signal` or `on_market_data`.
-                               # I'll add `prev_ma_short`, `prev_ma_long` to `generate_signal` arguments to allow crossover check.
-                               # But the prompt's `generate_signal` signature is fixed: (symbol, ma_short, ma_long, current_price, adx_value).
-                               # It doesn't have prev values.
-                               # So the prompt code is likely a simplified example or implies "State-based" signal.
-                               # If I implement state-based, I need a mechanism to prevent repeating signals.
-                               # I'll assume the caller (on_market_data) handles the "Cross" detection
-                               # and only calls `generate_signal` when a cross happens?
-                               # NO, `generate_signal` returns the dict.
-                               # I will implement `generate_signal` as requested (stateless check),
-                               # BUT inside `on_market_data` I will only call it if a CROSSOVER occurred.
+            prev = df.iloc[-2]
 
             # Crossover Check
             is_golden_cross = (prev["fast_sma"] <= prev["slow_sma"] and curr["fast_sma"] > curr["slow_sma"])
