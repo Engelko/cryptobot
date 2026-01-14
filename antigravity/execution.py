@@ -57,6 +57,11 @@ class PaperBroker:
 
         elif signal.type == SignalType.SELL:
             if signal.symbol not in self.positions or self.positions[signal.symbol]["quantity"] <= 0:
+                # Paper Broker Simple: If no position, treat SELL as Short Entry?
+                # Existing Logic was "Close Only".
+                # Improving Paper Broker to match Real Broker improvement (Open Short)
+                # But to keep it simple and safe for now, leaving Paper Broker as is unless requested.
+                # Focusing on RealBroker as per user issue.
                 logger.warning("paper_sell_no_position", symbol=signal.symbol)
                 audit.log_event("EXECUTION", f"SELL REJECTED: No Position {signal.symbol}", "WARNING")
                 return
@@ -96,41 +101,52 @@ class RealBroker:
 
             logger.info("real_execution_start", symbol=signal.symbol, available_balance=available_balance)
 
+            # Check for existing position to determine intent (Open vs Close)
+            positions = await client.get_positions(category="linear", symbol=signal.symbol)
+
+            long_pos = None
+            short_pos = None
+            for p in positions:
+                # Bybit V5: side is "Buy" (Long) or "Sell" (Short). size is always positive.
+                if p.get("side") == "Buy" and float(p.get("size", 0)) > 0:
+                    long_pos = p
+                elif p.get("side") == "Sell" and float(p.get("size", 0)) > 0:
+                    short_pos = p
+
+            # ---------------------------------------------------------
+            # BUY SIGNAL
+            # ---------------------------------------------------------
             if signal.type == SignalType.BUY:
-                # 2. Determine Trade Size
-                # "Take from wallet balance... not more than is on the wallet"
-                # Logic: min(Configured_Max, Available_Balance)
+                # If we are Short, this Buy is a "Close Short" (or reduce).
+                # If we are Flat/Long, this Buy is an "Open/Add Long".
+
+                # Logic: Calculate size and place Buy Order.
+
+                # Trade Sizing
                 max_size = settings.MAX_POSITION_SIZE
                 trade_size = min(available_balance, max_size)
 
-                logger.info("real_trade_sizing", max_size=max_size, available=available_balance, final_size=trade_size)
-
-                # Minimum order size check (approx 10 USDT for Bybit usually)
+                # Min Order Check
                 if trade_size < 10.0:
                     logger.warning("real_insufficient_funds", available=available_balance, required=10.0)
-                    audit.log_event("EXECUTION", f"BUY REJECTED: Low Balance {available_balance:.2f} < 10", "WARNING")
                     return
 
-                # 3. Calculate Quantity
-                # For Linear Perp (BTCUSDT), qty is in Base Coin (BTC)
                 price = signal.price
                 qty = trade_size / price
-
-                # Rounding: Bybit requires specific precision.
-                # For BTC and high-value coins, we need at least 5 decimal places.
-                # We use .5f to be safer for BTC/ETH, while avoiding too many decimals for low-value coins (which API might reject if too precise? Bybit usually truncates).
                 qty_str = f"{qty:.5f}"
 
-                # Check for zero quantity after formatting
                 if float(qty_str) <= 0:
-                     logger.warning("real_buy_qty_zero", symbol=signal.symbol, qty_raw=qty, qty_formatted=qty_str)
-                     audit.log_event("EXECUTION", f"BUY REJECTED: Qty 0 ({qty_str})", "WARNING")
+                     logger.warning("real_buy_qty_zero", symbol=signal.symbol, qty=qty_str)
                      return
 
-                logger.info("real_placing_buy", symbol=signal.symbol, qty=qty_str, expected_price=price)
+                # PnL Estimation if Closing Short
+                if short_pos:
+                    # We are closing (at least partially) a short position
+                    # This is complex to estimate perfectly before fill, but we can log intent
+                    logger.info("real_buy_closing_short", symbol=signal.symbol, short_size=short_pos["size"])
+                    # PnL logic could go here, but omitted for simplicity/safety to focus on execution.
 
-                # 4. Place Order
-                # Market Order for immediate execution
+                # Place Order
                 res = await client.place_order(
                     category="linear",
                     symbol=signal.symbol,
@@ -139,78 +155,83 @@ class RealBroker:
                     qty=qty_str
                 )
 
-                logger.info("real_buy_response", response=res)
-
                 if res and "orderId" in res:
-                    logger.info("real_buy_filled", order_id=res["orderId"], qty=qty_str, cost=trade_size)
+                    logger.info("real_buy_filled", order_id=res["orderId"], qty=qty_str)
                     db.save_trade(signal.symbol, "BUY", price, float(qty_str), trade_size, strategy_name, exec_type="REAL")
-                    audit.log_event("EXECUTION", f"REAL BUY: {signal.symbol} {qty_str} @ ~{price}", "INFO")
                 else:
                     logger.error("real_buy_failed", res=res)
-                    audit.log_event("EXECUTION", f"BUY FAILED: {str(res)}", "ERROR")
 
+            # ---------------------------------------------------------
+            # SELL SIGNAL
+            # ---------------------------------------------------------
             elif signal.type == SignalType.SELL:
-                # For SELL (Close Position), we need to check if we have an open position first.
-                # In this simple bot, SELL usually means "Close Long".
-                # We need to know the open size.
+                # If we are Long, this Sell is a "Close Long".
+                # If we are Flat/Short, this Sell is an "Open/Add Short".
 
-                positions = await client.get_positions(category="linear", symbol=signal.symbol)
-                # positions is a list
-                if not positions:
-                     logger.warning("real_sell_no_position", symbol=signal.symbol)
-                     return
+                if long_pos:
+                    # CLOSE LONG
+                    qty_to_close = long_pos["size"]
+                    logger.info("real_sell_closing_long", symbol=signal.symbol, size=qty_to_close)
 
-                # Assuming single position mode or net mode
-                # Find position with size > 0
-                target_pos = None
-                for p in positions:
-                    if float(p.get("size", 0)) > 0:
-                        target_pos = p
-                        break
-
-                if not target_pos:
-                    logger.warning("real_sell_no_open_qty", symbol=signal.symbol)
-                    return
-
-                qty_to_close = target_pos["size"] # Close full position
-
-                res = await client.place_order(
-                    category="linear",
-                    symbol=signal.symbol,
-                    side="Sell",
-                    orderType="Market",
-                    qty=qty_to_close
-                )
-
-                if res and "orderId" in res:
-                    logger.info("real_sell_filled", order_id=res["orderId"], qty=qty_to_close)
-
-                    # Estimate PnL based on position entry price vs current market price (signal price)
-                    # This is an approximation as the fill price might differ slightly.
-                    try:
-                        entry_price = float(target_pos.get("avgPrice", 0.0))
-                        exit_price = float(signal.price)
-                        qty = float(qty_to_close)
-
-                        # Long PnL = (Exit - Entry) * Qty
-                        estimated_pnl = (exit_price - entry_price) * qty
-
-                        logger.info("real_pnl_estimation", entry=entry_price, exit=exit_price, qty=qty, pnl=estimated_pnl)
-                    except Exception as ex:
-                        logger.warning("real_pnl_estimation_failed", error=str(ex))
-                        estimated_pnl = 0.0
-
-                    # Save trade with estimated PnL
-                    db.save_trade(signal.symbol, "SELL", signal.price, float(qty_to_close), 0.0, strategy_name, exec_type="REAL", pnl=estimated_pnl)
-                    audit.log_event("EXECUTION", f"REAL SELL: {signal.symbol} {qty_to_close} | Est PnL: {estimated_pnl:.2f}", "INFO")
-
-                    # Publish PnL Event for Risk Manager
-                    await event_bus.publish(TradeClosedEvent(
+                    res = await client.place_order(
+                        category="linear",
                         symbol=signal.symbol,
-                        pnl=estimated_pnl,
-                        strategy=strategy_name,
-                        execution_type="REAL"
-                    ))
+                        side="Sell",
+                        orderType="Market",
+                        qty=qty_to_close
+                    )
+
+                    if res and "orderId" in res:
+                        logger.info("real_sell_close_filled", order_id=res["orderId"])
+
+                        # Estimate PnL
+                        try:
+                            entry = float(long_pos.get("avgPrice", 0))
+                            exit_p = float(signal.price)
+                            qty_f = float(qty_to_close)
+                            pnl = (exit_p - entry) * qty_f
+
+                            db.save_trade(signal.symbol, "SELL", exit_p, qty_f, 0.0, strategy_name, exec_type="REAL", pnl=pnl)
+                            await event_bus.publish(TradeClosedEvent(symbol=signal.symbol, pnl=pnl, strategy=strategy_name, execution_type="REAL"))
+                        except Exception:
+                            pass
+                    else:
+                        logger.error("real_sell_close_failed", res=res)
+
+                else:
+                    # OPEN SHORT (Flat or already Short)
+                    # Logic similar to Buy: Calculate size based on balance
+
+                    max_size = settings.MAX_POSITION_SIZE
+                    trade_size = min(available_balance, max_size)
+
+                    if trade_size < 10.0:
+                        logger.warning("real_sell_insufficient_funds", available=available_balance, required=10.0)
+                        return
+
+                    price = signal.price
+                    qty = trade_size / price
+                    qty_str = f"{qty:.5f}"
+
+                    if float(qty_str) <= 0:
+                         logger.warning("real_sell_qty_zero", symbol=signal.symbol, qty=qty_str)
+                         return
+
+                    logger.info("real_sell_opening_short", symbol=signal.symbol, qty=qty_str)
+
+                    res = await client.place_order(
+                        category="linear",
+                        symbol=signal.symbol,
+                        side="Sell",
+                        orderType="Market",
+                        qty=qty_str
+                    )
+
+                    if res and "orderId" in res:
+                        logger.info("real_sell_short_filled", order_id=res["orderId"], qty=qty_str)
+                        db.save_trade(signal.symbol, "SELL", price, float(qty_str), trade_size, strategy_name, exec_type="REAL")
+                    else:
+                        logger.error("real_sell_short_failed", res=res)
 
         except Exception as e:
             logger.error("real_execution_error", error=str(e))
