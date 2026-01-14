@@ -1,4 +1,5 @@
 from typing import Dict, Optional
+from decimal import Decimal, ROUND_DOWN
 from antigravity.config import settings
 from antigravity.strategy import Signal, SignalType
 from antigravity.logging import get_logger
@@ -8,6 +9,22 @@ from antigravity.client import BybitClient
 from antigravity.event import event_bus, TradeClosedEvent
 
 logger = get_logger("execution")
+
+# Hardcoded Precision Map for Testnet/Linear
+# Based on typical Bybit specs.
+# Safe fallback: Floor to these decimals.
+PRECISION_MAP = {
+    "BTCUSDT": 3,
+    "ETHUSDT": 2,
+    "SOLUSDT": 1,
+    "XRPUSDT": 1,
+    "ADAUSDT": 0, # Integer is safer for low value
+    "DOGEUSDT": 0,
+    "BNBUSDT": 2,
+    "MATICUSDT": 0,
+    "DOTUSDT": 1,
+    "LTCUSDT": 2,
+}
 
 class PaperBroker:
     """
@@ -57,11 +74,6 @@ class PaperBroker:
 
         elif signal.type == SignalType.SELL:
             if signal.symbol not in self.positions or self.positions[signal.symbol]["quantity"] <= 0:
-                # Paper Broker Simple: If no position, treat SELL as Short Entry?
-                # Existing Logic was "Close Only".
-                # Improving Paper Broker to match Real Broker improvement (Open Short)
-                # But to keep it simple and safe for now, leaving Paper Broker as is unless requested.
-                # Focusing on RealBroker as per user issue.
                 logger.warning("paper_sell_no_position", symbol=signal.symbol)
                 audit.log_event("EXECUTION", f"SELL REJECTED: No Position {signal.symbol}", "WARNING")
                 return
@@ -107,7 +119,6 @@ class RealBroker:
             long_pos = None
             short_pos = None
             for p in positions:
-                # Bybit V5: side is "Buy" (Long) or "Sell" (Short). size is always positive.
                 if p.get("side") == "Buy" and float(p.get("size", 0)) > 0:
                     long_pos = p
                 elif p.get("side") == "Sell" and float(p.get("size", 0)) > 0:
@@ -117,11 +128,6 @@ class RealBroker:
             # BUY SIGNAL
             # ---------------------------------------------------------
             if signal.type == SignalType.BUY:
-                # If we are Short, this Buy is a "Close Short" (or reduce).
-                # If we are Flat/Long, this Buy is an "Open/Add Long".
-
-                # Logic: Calculate size and place Buy Order.
-
                 # Trade Sizing
                 max_size = settings.MAX_POSITION_SIZE
                 trade_size = min(available_balance, max_size)
@@ -133,18 +139,11 @@ class RealBroker:
 
                 price = signal.price
                 qty = trade_size / price
-                qty_str = f"{qty:.5f}"
+                qty_str = self._format_qty(signal.symbol, qty)
 
                 if float(qty_str) <= 0:
                      logger.warning("real_buy_qty_zero", symbol=signal.symbol, qty=qty_str)
                      return
-
-                # PnL Estimation if Closing Short
-                if short_pos:
-                    # We are closing (at least partially) a short position
-                    # This is complex to estimate perfectly before fill, but we can log intent
-                    logger.info("real_buy_closing_short", symbol=signal.symbol, short_size=short_pos["size"])
-                    # PnL logic could go here, but omitted for simplicity/safety to focus on execution.
 
                 # Place Order
                 res = await client.place_order(
@@ -165,12 +164,12 @@ class RealBroker:
             # SELL SIGNAL
             # ---------------------------------------------------------
             elif signal.type == SignalType.SELL:
-                # If we are Long, this Sell is a "Close Long".
-                # If we are Flat/Short, this Sell is an "Open/Add Short".
-
                 if long_pos:
                     # CLOSE LONG
-                    qty_to_close = long_pos["size"]
+                    qty_to_close = long_pos["size"] # Already formatted by API?
+                    # API returns string, usually correct format. But let's be safe?
+                    # Usually closing matches open size exactly.
+
                     logger.info("real_sell_closing_long", symbol=signal.symbol, size=qty_to_close)
 
                     res = await client.place_order(
@@ -200,8 +199,6 @@ class RealBroker:
 
                 else:
                     # OPEN SHORT (Flat or already Short)
-                    # Logic similar to Buy: Calculate size based on balance
-
                     max_size = settings.MAX_POSITION_SIZE
                     trade_size = min(available_balance, max_size)
 
@@ -211,7 +208,7 @@ class RealBroker:
 
                     price = signal.price
                     qty = trade_size / price
-                    qty_str = f"{qty:.5f}"
+                    qty_str = self._format_qty(signal.symbol, qty)
 
                     if float(qty_str) <= 0:
                          logger.warning("real_sell_qty_zero", symbol=signal.symbol, qty=qty_str)
@@ -239,6 +236,28 @@ class RealBroker:
         finally:
             await client.close()
 
+    def _format_qty(self, symbol: str, qty: float) -> str:
+        """
+        Formats quantity to the correct precision for the symbol using floor rounding.
+        """
+        precision = PRECISION_MAP.get(symbol, 2) # Default to 2 decimals if unknown
+
+        try:
+            d = Decimal(str(qty))
+            if precision == 0:
+                quantizer = Decimal("1")
+            else:
+                quantizer = Decimal("0.1") ** precision
+
+            rounded = d.quantize(quantizer, rounding=ROUND_DOWN)
+
+            # Format avoiding scientific notation
+            return f"{rounded:f}"
+        except Exception as e:
+            logger.error("qty_format_error", symbol=symbol, error=str(e))
+            # Fallback to simple string format
+            return f"{qty:.{precision}f}"
+
     def _parse_available_balance(self, data: Dict) -> float:
         """
         Extract available USDT balance from Unified or Contract response.
@@ -246,12 +265,6 @@ class RealBroker:
         try:
             # 1. Unified Account
             if "totalWalletBalance" in data:
-                 # In UTA, available balance for opening positions can be 'totalMarginBalance'
-                 # or specifically 'totalAvailableBalance' if present?
-                 # Bybit V5: totalMarginBalance is equity.
-                 # We want available balance. 'totalAvailableBalance' is not always in the wallet-balance endpoint?
-                 # 'totalWalletBalance' is cash.
-                 # Let's use totalWalletBalance for simplicity as requested "money on wallet".
                  return float(data.get("totalWalletBalance", 0.0))
 
             # 2. Contract Account
