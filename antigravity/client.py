@@ -37,7 +37,8 @@ class BybitClient:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type((aiohttp.ClientError, AntigravityError)),
+        # Retry on network errors and 5xx/429 server errors (APIError with status >= 500)
+        retry=retry_if_exception_type(aiohttp.ClientError),
         reraise=True
     )
     async def _request(self, method: str, endpoint: str, payload: Dict[str, Any] = None, suppress_error_log: bool = False) -> Any:

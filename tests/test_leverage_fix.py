@@ -103,23 +103,51 @@ class TestLeverageFix(unittest.TestCase):
     def test_retry_on_network_error(self, mock_get_session):
         """
         Unit Test: Verify that _request retries on network error.
+        We expect 3 calls: 2 failures + 1 success.
         """
         mock_session = MagicMock()
-        # Side effect: first 2 calls raise ClientError, 3rd succeeds
-        mock_session.request.side_effect = [ClientError("Network Error"), ClientError("Network Error"), MagicMock()]
 
-        # Setup successful response for the 3rd attempt
-        mock_response = AsyncMock()
-        mock_response.text.return_value = json.dumps({"retCode": 0, "result": {}})
-        mock_response.status = 200
-        mock_session.request.side_effect = [ClientError("Fail 1"), ClientError("Fail 2"), mock_response]
+        # Setup mocks for 3 attempts
+        # Attempt 1: Network Error
+        # Attempt 2: Network Error
+        # Attempt 3: Success
 
-        # We need the context manager to return the mock response (which is the result of __aenter__)
-        # Since side_effect overrides return_value, we need to structure it differently or mock __aenter__ behavior
+        # We need mock_session.request to return a context manager
+        # whose __aenter__ raises ClientError for first two calls, then returns response
 
-        # A simpler way to test tenacity logic might be trusting the library, but let's try to verify call count.
-        # However, tenacity wraps the function, making it tricky with mocking internals of the function.
-        pass # Skipping complex retry mock test for now, relying on tenacity library correctness.
+        mock_success_response = AsyncMock()
+        mock_success_response.text.return_value = json.dumps({"retCode": 0, "result": {}})
+        mock_success_response.status = 200
+
+        # Create a side effect for the context manager's __aenter__
+        # This is tricky because session.request returns the context manager, not the result of enter
+
+        # Strategy: mock_session.request returns a NEW AsyncMock on each call
+        # We configure these mocks individually.
+
+        cm_fail = MagicMock()
+        cm_fail.__aenter__.side_effect = ClientError("Network Fail")
+
+        cm_success = MagicMock()
+        cm_success.__aenter__.return_value = mock_success_response
+
+        mock_session.request.side_effect = [cm_fail, cm_fail, cm_success]
+
+        mock_get_session.return_value = mock_session
+
+        client = BybitClient()
+
+        # Execute request
+        res = self.loop.run_until_complete(
+            client._request("GET", "/test-endpoint")
+        )
+
+        # Verify it succeeded eventually
+        self.assertEqual(res, {})
+
+        # Verify retry count (3 attempts = 3 calls to request)
+        self.assertEqual(mock_session.request.call_count, 3)
+
 
     @patch('antigravity.execution.BybitClient')
     def test_real_broker_execution_flow(self, MockClientClass):
