@@ -214,10 +214,10 @@ class RealBroker:
                 if signal.leverage and signal.leverage > 0:
                     leverage_set_success = await self._set_leverage(signal.symbol, signal.leverage)
                     if not leverage_set_success:
-                        logger.warning("leverage_set_failed_continue", symbol=signal.symbol, requested=signal.leverage)
+                        log.warning("leverage_set_failed_continue", symbol=signal.symbol, requested=signal.leverage)
                         # Don't return! Continue with order execution anyway
                     else:
-                        logger.info("leverage_set_success", symbol=signal.symbol, leverage=f"{signal.leverage}x")
+                        log.info("leverage_set_success", symbol=signal.symbol, leverage=f"{signal.leverage}x")
                 
                 # Calculate effective position size with leverage
                 trade_size = min(available_balance, max_size)
@@ -227,18 +227,18 @@ class RealBroker:
 
                 # Min Order Check
                 if trade_size < 10.0:
-                    logger.warning("real_insufficient_funds", available=available_balance, required=10.0)
+                    log.warning("real_insufficient_funds", available=available_balance, required=10.0)
                     return
 
                 price = signal.price if signal.price is not None else 0.0
                 if price <= 0:
-                    logger.error("Invalid price for signal")
+                    log.error("Invalid price for signal")
                     return
                 qty = trade_size / price
                 qty_str = self._format_qty(signal.symbol, qty)
 
                 if float(qty_str) <= 0:
-                     logger.warning("real_buy_qty_zero", symbol=signal.symbol, qty=qty_str)
+                     log.warning("real_buy_qty_zero", symbol=signal.symbol, qty=qty_str)
                      return
 
                 # Place Order
@@ -264,7 +264,7 @@ class RealBroker:
                             signal.symbol, "Buy", float(qty_str), signal.take_profit_levels, price
                         )
                 else:
-                    logger.error("real_buy_failed", res=res)
+                    log.error("real_buy_failed", res=res)
 
             # ---------------------------------------------------------
             # SELL SIGNAL
@@ -276,7 +276,7 @@ class RealBroker:
                     # API returns string, usually correct format. But let's be safe?
                     # Usually closing matches open size exactly.
 
-                    logger.info("real_sell_closing_long", symbol=signal.symbol, size=qty_to_close)
+                    log.info("real_sell_closing_long", symbol=signal.symbol, size=qty_to_close)
 
                     # Idempotency: Generate orderLinkId
                     order_link_id = f"{trace_id}-close-long"
@@ -305,7 +305,7 @@ class RealBroker:
                         except Exception:
                             pass
                     else:
-                        logger.error("real_sell_close_failed", res=res)
+                        log.error("real_sell_close_failed", res=res)
 
                 else:
                     # OPEN SHORT (Flat or already Short)
@@ -318,10 +318,10 @@ class RealBroker:
                     if signal.leverage and signal.leverage > 0:
                         leverage_set_success = await self._set_leverage(signal.symbol, signal.leverage)
                         if not leverage_set_success:
-                            logger.warning("leverage_set_failed_continue", symbol=signal.symbol, requested=signal.leverage)
+                            log.warning("leverage_set_failed_continue", symbol=signal.symbol, requested=signal.leverage)
                             # Don't return! Continue with order execution anyway
                         else:
-                            logger.info("leverage_set_success", symbol=signal.symbol, leverage=f"{signal.leverage}x")
+                            log.info("leverage_set_success", symbol=signal.symbol, leverage=f"{signal.leverage}x")
                     
                     # Calculate effective position size with leverage
                     trade_size = min(available_balance, max_size)
@@ -330,18 +330,18 @@ class RealBroker:
                         trade_size = min(trade_size * leverage_multiplier, max_size * leverage_multiplier)
 
                     if trade_size < 10.0:
-                        logger.warning("real_sell_insufficient_funds", available=available_balance, required=10.0)
+                        log.warning("real_sell_insufficient_funds", available=available_balance, required=10.0)
                         return
 
                     price = signal.price if signal.price is not None else 0.0
                     if price <= 0:
-                        logger.error("Invalid price for signal")
+                        log.error("Invalid price for signal")
                         return
                     qty = trade_size / price
                     qty_str = self._format_qty(signal.symbol, qty)
 
                     if float(qty_str) <= 0:
-                         logger.warning("real_sell_qty_zero", symbol=signal.symbol, qty=qty_str)
+                         log.warning("real_sell_qty_zero", symbol=signal.symbol, qty=qty_str)
                          return
 
                     log.info("real_sell_opening_short", symbol=signal.symbol, qty=qty_str)
@@ -369,10 +369,14 @@ class RealBroker:
                                     signal.symbol, "Sell", float(qty_str), signal.take_profit_levels, price
                                 )
                     else:
-                        logger.error("real_sell_short_failed", res=res)
+                        log.error("real_sell_short_failed", res=res)
 
         except Exception as e:
-            logger.error("real_execution_error", error=str(e))
+            # Check if 'log' is bound (in case exception happened before binding)
+            if 'log' in locals():
+                log.error("real_execution_error", error=str(e))
+            else:
+                logger.error("real_execution_error", error=str(e))
             audit.log_event("EXECUTION", f"ERROR: {str(e)}", "ERROR")
         finally:
             await client.close()

@@ -5,3 +5,15 @@ venv/
 __pycache__/
 data.db
 .streamlit/logs/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store

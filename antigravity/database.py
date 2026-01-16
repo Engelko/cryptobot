@@ -83,6 +83,12 @@ class Database:
         if db_path is None:
             db_path = settings.DATABASE_URL
         self.engine = create_engine(db_path, connect_args={"check_same_thread": False})
+
+        # Enable WAL mode for SQLite to handle concurrency better
+        if "sqlite" in db_path:
+            with self.engine.connect() as connection:
+                connection.exec_driver_sql("PRAGMA journal_mode=WAL;")
+
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
 
