@@ -88,11 +88,37 @@ class RiskManager:
                                notional=notional, limit=self.max_position_size)
                 return False
 
-            # Check Account Balance
-            if notional > available_balance:
-                 logger.warning("risk_block", reason="insufficient_balance_for_qty",
-                                required=notional, available=available_balance)
-                 return False
+            # Check Account Balance (considering leverage)
+            # If leverage is provided, we check MARGIN required, not full notional.
+            leverage = signal.leverage if signal.leverage and signal.leverage > 0 else 1.0
+            margin_required = notional / leverage
+
+            if margin_required > available_balance:
+                 # Instead of rejecting, we resize the signal to match available balance
+                 # Max Notional = Balance * Leverage
+                 max_notional_allowed = available_balance * leverage
+
+                 # Recalculate quantity
+                 new_quantity = max_notional_allowed / signal.price
+
+                 # Check if the new quantity is still viable (above min cost)
+                 new_notional = new_quantity * signal.price
+                 if new_notional < MIN_ORDER_COST:
+                     logger.warning("risk_block", reason="insufficient_balance_for_min_order",
+                                    required_margin=margin_required, available=available_balance,
+                                    min_order_cost=MIN_ORDER_COST)
+                     return False
+
+                 # Update signal in place
+                 logger.info("risk_resize",
+                             original_qty=signal.quantity,
+                             new_qty=new_quantity,
+                             reason="insufficient_balance_margin_limit",
+                             available_balance=available_balance,
+                             leverage=leverage)
+
+                 signal.quantity = new_quantity
+                 # Signal is now safe to proceed
 
         else:
             # Quantity not provided. Strategy relies on Execution logic to size the trade.
