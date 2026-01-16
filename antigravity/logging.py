@@ -18,14 +18,10 @@ def configure_logging():
         structlog.processors.UnicodeDecoder(),
     ]
 
-    if settings.ENVIRONMENT == "production":
-        processors = shared_processors + [
-            structlog.processors.JSONRenderer()
-        ]
-    else:
-        processors = shared_processors + [
-            structlog.dev.ConsoleRenderer()
-        ]
+    # Force JSON logs for both dev and prod for consistency and parsability (Report item 7)
+    processors = shared_processors + [
+        structlog.processors.JSONRenderer()
+    ]
 
     structlog.configure(
         processors=processors,
@@ -38,7 +34,7 @@ def configure_logging():
         foreign_pre_chain=shared_processors,
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            structlog.dev.ConsoleRenderer() if settings.ENVIRONMENT == "development" else structlog.processors.JSONRenderer(),
+            structlog.processors.JSONRenderer(),
         ],
     )
 
@@ -49,12 +45,12 @@ def configure_logging():
     try:
         file_handler = logging.FileHandler("storage/antigravity.log")
 
-        # Use a plain renderer (no colors) for the file handler to ensure readability in dashboard
+        # Use JSON renderer for file handler too
         file_formatter = structlog.stdlib.ProcessorFormatter(
             foreign_pre_chain=shared_processors,
             processors=[
                 structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-                structlog.dev.ConsoleRenderer(colors=False),
+                structlog.processors.JSONRenderer(),
             ],
         )
         file_handler.setFormatter(file_formatter)

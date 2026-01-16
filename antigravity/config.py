@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     ENVIRONMENT: Literal["development", "production"] = "development"
 
     # Risk Management
-    MAX_DAILY_LOSS: float = Field(100.0, description="Max daily loss in USDT")
-    MAX_POSITION_SIZE: float = Field(1000.0, description="Max position size in USDT")
+    MAX_DAILY_LOSS: float = Field(100.0, gt=0, description="Max daily loss in USDT")
+    MAX_POSITION_SIZE: float = Field(1000.0, gt=0, description="Max position size in USDT")
 
     # AI / LLM Configuration
     LLM_API_KEY: str = Field(default="", description="API Key for LLM Provider")
