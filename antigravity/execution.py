@@ -219,22 +219,44 @@ class RealBroker:
                     else:
                         log.info("leverage_set_success", symbol=signal.symbol, leverage=f"{signal.leverage}x")
                 
-                # Calculate effective position size with leverage
-                trade_size = min(available_balance, max_size)
-                if leverage_multiplier > 1.0:
-                    # Apply leverage: we can trade more than our balance
-                    trade_size = min(trade_size * leverage_multiplier, max_size * leverage_multiplier)
-
-                # Min Order Check
-                if trade_size < 10.0:
-                    log.warning("real_insufficient_funds", available=available_balance, required=10.0)
-                    return
-
+                # Determine Trade Size
+                # If signal has quantity, use it (RiskManager has already validated/resized it)
+                # Fallback to maximizing logic if quantity is missing
                 price = signal.price if signal.price is not None else 0.0
                 if price <= 0:
                     log.error("Invalid price for signal")
                     return
-                qty = trade_size / price
+
+                if signal.quantity and signal.quantity > 0:
+                    qty = signal.quantity
+                    # Double check safety (clamp to max_size just in case)
+                    notional = qty * price
+                    if notional > max_size:
+                        qty = max_size / price
+                        log.warning("real_buy_clamped_max_size", original=signal.quantity, clamped=qty)
+
+                    # Also clamp to available balance (margin check)
+                    # available_balance is the USDT available.
+                    # required_margin = notional / leverage
+                    required_margin = (qty * price) / leverage_multiplier
+                    if required_margin > available_balance:
+                        # Resize to fit balance
+                        qty = (available_balance * leverage_multiplier) / price
+                        log.warning("real_buy_clamped_balance", original=signal.quantity, clamped=qty, balance=available_balance)
+
+                    trade_size = qty * price
+                else:
+                    # Legacy logic: Maximize trade
+                    trade_size = min(available_balance, max_size)
+                    if leverage_multiplier > 1.0:
+                        trade_size = min(trade_size * leverage_multiplier, max_size * leverage_multiplier)
+                    qty = trade_size / price
+
+                # Min Order Check
+                if trade_size < 10.0:
+                    log.warning("real_insufficient_funds", available=available_balance, required=10.0, planned_trade_size=trade_size)
+                    return
+
                 qty_str = self._format_qty(signal.symbol, qty)
 
                 if float(qty_str) <= 0:
@@ -323,21 +345,38 @@ class RealBroker:
                         else:
                             log.info("leverage_set_success", symbol=signal.symbol, leverage=f"{signal.leverage}x")
                     
-                    # Calculate effective position size with leverage
-                    trade_size = min(available_balance, max_size)
-                    if leverage_multiplier > 1.0:
-                        # Apply leverage: we can trade more than our balance
-                        trade_size = min(trade_size * leverage_multiplier, max_size * leverage_multiplier)
-
-                    if trade_size < 10.0:
-                        log.warning("real_sell_insufficient_funds", available=available_balance, required=10.0)
-                        return
-
                     price = signal.price if signal.price is not None else 0.0
                     if price <= 0:
                         log.error("Invalid price for signal")
                         return
-                    qty = trade_size / price
+
+                    if signal.quantity and signal.quantity > 0:
+                        qty = signal.quantity
+                        # Double check safety (clamp to max_size just in case)
+                        notional = qty * price
+                        if notional > max_size:
+                            qty = max_size / price
+                            log.warning("real_sell_clamped_max_size", original=signal.quantity, clamped=qty)
+
+                        # Also clamp to available balance (margin check)
+                        required_margin = (qty * price) / leverage_multiplier
+                        if required_margin > available_balance:
+                            # Resize to fit balance
+                            qty = (available_balance * leverage_multiplier) / price
+                            log.warning("real_sell_clamped_balance", original=signal.quantity, clamped=qty, balance=available_balance)
+
+                        trade_size = qty * price
+                    else:
+                        # Legacy logic: Maximize trade
+                        trade_size = min(available_balance, max_size)
+                        if leverage_multiplier > 1.0:
+                            trade_size = min(trade_size * leverage_multiplier, max_size * leverage_multiplier)
+                        qty = trade_size / price
+
+                    if trade_size < 10.0:
+                        log.warning("real_sell_insufficient_funds", available=available_balance, required=10.0, planned_trade_size=trade_size)
+                        return
+
                     qty_str = self._format_qty(signal.symbol, qty)
 
                     if float(qty_str) <= 0:
