@@ -188,22 +188,44 @@ class BybitClient:
 
     async def set_leverage(self, category: str = "linear", symbol: str = "", leverage: str = "") -> bool:
         """
-        Set Leverage for a symbol.
+        Set Leverage for a symbol using Bybit V5 API.
+        Accepts a single leverage value and applies it to both Buy and Sell sides (Symmetric Leverage).
         """
         endpoint = "/v5/position/set-leverage"
+
         # Convert to float for proper numeric format
-        leverage_num = float(leverage) if leverage else 1.0
+        try:
+            # Default to 1.0 (safe fallback) if empty
+            leverage_num = float(leverage) if leverage else 1.0
+        except (ValueError, TypeError):
+            logger.error("invalid_leverage_format", symbol=symbol, leverage=leverage)
+            return False
+
+        # Bybit V5 requires buyLeverage and sellLeverage
         payload = {
             "category": category,
             "symbol": symbol,
-            "leverage": leverage_num  # Send as number, not string
+            "buyLeverage": str(leverage_num),
+            "sellLeverage": str(leverage_num)
         }
             
         try:
-            logger.info(f"set_leverage_attempt", symbol=symbol, leverage=leverage, payload=payload)
+            logger.info("set_leverage_attempt", symbol=symbol, leverage=leverage_num, payload=payload)
+            # _request raises APIError if retCode != 0
             res = await self._request("POST", endpoint, payload)
-            logger.info(f"set_leverage_response", symbol=symbol, response=res)
-            return res and res.get("retCode") == 0
+
+            logger.info("set_leverage_success", symbol=symbol, leverage=leverage_num)
+            return True
+
+        except APIError as e:
+            # Handle "Leverage not modified" (110043) as success
+            if e.code == 110043:
+                logger.info("leverage_already_set", symbol=symbol, leverage=leverage_num)
+                return True
+
+            logger.error("set_leverage_api_error", symbol=symbol, code=e.code, msg=str(e))
+            return False
+
         except Exception as e:
             logger.error("set_leverage_failed", symbol=symbol, leverage=leverage, error=str(e))
             return False
