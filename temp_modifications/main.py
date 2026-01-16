@@ -16,7 +16,6 @@ from antigravity.strategies.volatility import VolatilityBreakoutStrategy
 from antigravity.strategies.scalping import ScalpingStrategy
 from antigravity.strategies.bb_squeeze import BBSqueezeStrategy
 from antigravity.strategies.grid_improved import GridMasterImproved as GridStrategy
-from antigravity.strategies.dynamic_risk_leverage import DynamicRiskLeverageStrategy
 
 logger = get_logger("main")
 
@@ -83,10 +82,6 @@ async def main():
     if config.grid and config.grid.enabled:
         strategy_engine.register_strategy(GridStrategy(config.grid, symbols))
         logger.info("strategy_registered", name="Grid")
-
-    if config.dynamic_risk_leverage and config.dynamic_risk_leverage.enabled:
-        strategy_engine.register_strategy(DynamicRiskLeverageStrategy(config.dynamic_risk_leverage, symbols))
-        logger.info("strategy_registered", name="DynamicRiskLeverage")
     
     # Initialize Engine & Event Bus
     event_bus.start()

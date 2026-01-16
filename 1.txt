@@ -1,0 +1,125 @@
+--- Starting API Full Verification ---
+
+1. Testing Wallet Balance (USDT)...
+   Requesting UNIFIED account...
+2025-12-29 09:26:09 [debug    ] api_request                    method=GET url='https://api-testnet.bybit.com/v5/account/wallet-balance?accountType=UNIFIED&coin=USDT'
+   UNIFIED Response: {
+  "list": [
+    {
+      "accountIMRate": "0",
+      "totalMaintenanceMarginByMp": "0",
+      "totalInitialMargin": "0",
+      "accountType": "UNIFIED",
+      "accountMMRate": "0",
+      "accountMMRateByMp": "0",
+      "accountIMRateByMp": "0",
+      "totalInitialMarginByMp": "0",
+      "totalMaintenanceMargin": "0",
+      "totalEquity": "549.09923596",
+      "totalMarginBalance": "549.06978917",
+      "totalAvailableBalance": "549.06978917",
+      "totalPerpUPL": "0",
+      "totalWalletBalance": "549.06978917",
+      "accountLTV": "0",
+      "coin": [
+        {
+          "spotBorrow": "0",
+          "availableToBorrow": "",
+          "bonus": "0",
+          "accruedInterest": "0",
+          "availableToWithdraw": "",
+          "totalOrderIM": "0",
+          "equity": "549.74872885",
+          "totalPositionMM": "0",
+          "usdValue": "549.06978917",
+          "unrealisedPnl": "0",
+          "collateralSwitch": true,
+          "spotHedgingQty": "0",
+          "borrowAmount": "0.000000000000000000",
+          "totalPositionIM": "0",
+          "walletBalance": "549.74872885",
+          "cumRealisedPnl": "3823.83897875",
+          "locked": "0",
+          "marginCollateral": true,
+          "coin": "USDT"
+        }
+      ]
+    }
+  ]
+}
+   Requesting CONTRACT account...
+2025-12-29 09:26:09 [debug    ] api_request                    method=GET url='https://api-testnet.bybit.com/v5/account/wallet-balance?accountType=CONTRACT&coin=USDT'
+2025-12-29 09:26:09 [error    ] api_error                      ret_code=10001 ret_msg='accountType only support UNIFIED.'
+   ERROR: [10001] accountType only support UNIFIED. (HTTP 200)
+
+2. Testing Positions (Linear)...
+   Requesting positions with params: {'category': 'linear', 'settleCoin': 'USDT'}
+2025-12-29 09:26:09 [debug    ] api_request                    method=GET url='https://api-testnet.bybit.com/v5/position/list?category=linear&settleCoin=USDT'
+   POSITIONS Response: {
+  "nextPageCursor": "",
+  "category": "linear",
+  "list": []
+}
+
+3. Testing Open Orders (Linear)...
+   Requesting open orders with params: {'category': 'linear', 'settleCoin': 'USDT'}
+2025-12-29 09:26:10 [debug    ] api_request                    method=GET url='https://api-testnet.bybit.com/v5/order/realtime?category=linear&settleCoin=USDT'
+   ORDERS Response: {
+  "nextPageCursor": "",
+  "category": "linear",
+  "list": []
+}
+
+4. Testing Closed PnL (Linear)...
+   Requesting closed pnl with params: {'category': 'linear', 'settleCoin': 'USDT', 'limit': 5}
+2025-12-29 09:26:10 [debug    ] api_request                    method=GET url='https://api-testnet.bybit.com/v5/position/closed-pnl?category=linear&limit=5&settleCoin=USDT'
+   PNL Response: {
+  "nextPageCursor": "a9c86673-740f-409e-9168-35c8ead35777%3A1766496795278%2C74cb6347-0ce2-447b-86a5-da657318d103%3A1766409887551",
+  "category": "linear",
+  "list": [
+    {
+      "symbol": "BTCUSDT",
+      "orderType": "Market",
+      "leverage": "10",
+      "updatedTime": "1766496795278",
+      "side": "Sell",
+      "orderId": "a9c86673-740f-409e-9168-35c8ead35777",
+      "closedPnl": "-0.5995482",
+      "openFee": "0.139035",
+      "closeFee": "0.1387132",
+      "avgEntryPrice": "69517.5",
+      "qty": "0.002",
+      "cumEntryValue": "139.035",
+      "createdTime": "1766496795274",
+      "orderPrice": "68758.9",
+      "closedSize": "0.002",
+      "avgExitPrice": "69356.6",
+      "execType": "Trade",
+      "fillCount": "1",
+      "cumExitValue": "138.7132"
+    },
+    {
+      "symbol": "BTCUSDT",
+      "orderType": "Market",
+      "leverage": "10",
+      "updatedTime": "1766409887551",
+      "side": "Sell",
+      "orderId": "74cb6347-0ce2-447b-86a5-da657318d103",
+      "closedPnl": "-0.054609",
+      "openFee": "0.786045",
+      "closeFee": "0.787564",
+      "avgEntryPrice": "786045",
+      "qty": "0.001",
+      "cumEntryValue": "786.045",
+      "createdTime": "1766409887546",
+      "orderPrice": "765061.6",
+      "closedSize": "0.001",
+      "avgExitPrice": "787564",
+      "execType": "Trade",
+      "fillCount": "1",
+      "cumExitValue": "787.564"
+    }
+  ]
+}
+
+--- Verification Complete ---

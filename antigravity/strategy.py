@@ -14,12 +14,25 @@ class SignalType(Enum):
     HOLD = "HOLD"
 
 @dataclass
+class TakeProfitLevel:
+    price: float
+    quantity_percentage: float  # Percentage of position to close
+    reason: str = ""
+
+@dataclass
 class Signal:
     type: SignalType
     symbol: str
     price: Optional[float] = None
     quantity: Optional[float] = None
     reason: str = ""
+    
+    # Advanced exit management
+    stop_loss: Optional[float] = None
+    take_profit_levels: Optional[List[TakeProfitLevel]] = None
+    leverage: Optional[float] = None
+    risk_percentage: Optional[float] = None
+    trailing_stop: Optional[bool] = False
 
 class BaseStrategy(ABC):
     def __init__(self, name: str, symbols: List[str]):

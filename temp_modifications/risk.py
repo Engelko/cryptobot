@@ -124,7 +124,7 @@ class RiskManager:
             db.update_risk_state(self.current_daily_loss, self.last_reset_date)
 
     
-    async def _fetch_balance_from_api(self) -> float:
+    def _fetch_balance_from_api(self) -> float:
         """Fetch fresh balance from API"""
         if settings.SIMULATION_MODE:
             return execution_manager.paper_broker.balance

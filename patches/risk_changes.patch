@@ -1,0 +1,69 @@
+diff --git a/antigravity/risk.py b/antigravity/risk.py
+index 1111111..2222222 100644
+--- a/antigravity/risk.py
++++ b/antigravity/risk.py
+@@ -1,4 +1,5 @@
+-import time
+ from datetime import datetime, timezone
++import time
+ from antigravity.config import settings
+ from antigravity.strategy import Signal, SignalType
+ from antigravity.logging import get_logger
+ from antigravity.client import BybitClient
+ from antigravity.execution import execution_manager
+ from antigravity.database import db
+ from antigravity.event import event_bus, TradeClosedEvent, on_event
++from antigravity.metrics import metrics
+ 
+ logger = get_logger("risk_manager")
+ 
+@@ -17,6 +18,12 @@ class RiskManager:
+         self.current_daily_loss = 0.0
+         self.last_reset_date = None
+ 
++        # Cache fields
++        self._cached_balance = 0.0
++        self._balance_cache_time = 0
++        self._last_rejection_reason = None
++
+         # Load persisted state
+         state = db.get_risk_state()
+         if state:
+@@ -116,18 +123,30 @@ class RiskManager:
+         # Persist new loss state
+         db.update_risk_state(self.current_daily_loss, self.last_reset_date)
+ 
++    def _fetch_balance_from_api(self) -> float:
++        """Fetch fresh balance from API"""
++        if settings.SIMULATION_MODE:
++            return execution_manager.paper_broker.balance
++        
++        client = BybitClient()
++        try:
++            balance_data = await client.get_wallet_balance(coin="USDT")
++            if "totalWalletBalance" in balance_data:
++                return float(balance_data.get("totalWalletBalance", 0.0))
++            elif "coin" in balance_data:
++                for c in balance_data["coin"]:
++                    if c.get("coin") == "USDT":
++                        return float(c.get("walletBalance", 0.0))
++        finally:
++            await client.close()
++        
++        return 0.0
++
+     async def _get_available_balance(self) -> float:
+         """
+         Fetch available USDT balance.
+         If Simulation Mode, fetch from PaperBroker.
+         If Real Mode, fetch from Bybit API.
+         """
++        # Use cached balance for 30 seconds
++        current_time = time.time()
++        if hasattr(self, '_cached_balance') and (current_time - self._balance_cache_time) < 30:
++            return self._cached_balance
++
++        balance = await self._fetch_balance_from_api()
++        self._cached_balance = balance
++        self._balance_cache_time = current_time
++        return balance

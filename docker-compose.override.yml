@@ -1,0 +1,11 @@
+services:
+  engine:
+    volumes:
+      - .:/app
+      - ./storage:/app/storage
+      - ./.env:/app/.env
+  dashboard:
+    volumes:
+      - .:/app
+      - ./storage:/app/storage
+      - ./.env:/app/.env

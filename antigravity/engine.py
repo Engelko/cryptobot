@@ -214,7 +214,8 @@ class StrategyEngine:
         """
         # 1. Risk Check
         if not await self.risk_manager.check_signal(signal):
-            logger.info("signal_rejected_by_risk", strategy=strategy_name, symbol=signal.symbol)
+            logger.warning("signal_rejected_by_risk", strategy=strategy_name, symbol=signal.symbol, 
+                         leverage=signal.leverage, risk_percentage=signal.risk_percentage)
             # Save rejected signal to DB for visibility in Dashboard
             db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price,
                            f"[REJECTED: Risk Limit] {signal.reason}")

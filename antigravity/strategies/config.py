@@ -55,6 +55,53 @@ class GridConfig(BaseModel):
     grid_levels: int = 10
     amount_per_grid: float = 0.001
 
+class DynamicRiskLeverageConfig(BaseModel):
+    enabled: bool = False
+    name: str = "DynamicRiskLeverage"
+    
+    # Timeframes
+    macro_tf: str = "4h"  # For trend analysis
+    main_tf: str = "1h"  # For entry signals
+    
+    # Risk parameters
+    max_risk_per_trade: float = 0.02  # 2% max
+    daily_loss_limit: float = 0.05    # 5% daily max
+    
+    # Leverage tiers
+    high_risk_leverage: float = 2.5   # x2-x3
+    medium_risk_leverage: float = 6.0 # x5-x7
+    low_risk_leverage: float = 9.0    # x8-x10
+    extreme_risk_leverage: float = 12.5 # x10-x15
+    
+    # Entry types risk allocation
+    type_a_risk: float = 0.015  # 1.5-2%
+    type_b_risk: float = 0.012  # 1-1.5%
+    type_c_risk: float = 0.005  # 0.5%
+    
+    # Technical indicators
+    ema_fast: int = 20
+    ema_slow: int = 50
+    rsi_period: int = 14
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    volume_ma_period: int = 20
+    
+    # Levels and zones
+    support_resistance_lookback: int = 100
+    min_distance_to_level: float = 0.015  # 1.5%
+    max_distance_to_level: float = 0.03   # 3%
+    
+    # Volume filters
+    min_volume_multiplier: float = 1.3
+    max_volume_drop_threshold: float = 0.7  # 30% below average
+    
+    # RSI zones
+    rsi_extreme_oversold: float = 20
+    rsi_oversold: float = 30
+    rsi_overbought: float = 70
+    rsi_extreme_overbought: float = 80
+
 class StrategiesConfig(BaseModel):
     trend_following: Optional[TrendConfig] = None
     mean_reversion: Optional[MeanReversionConfig] = None
@@ -62,6 +109,7 @@ class StrategiesConfig(BaseModel):
     scalping: Optional[ScalpingConfig] = None
     bb_squeeze: Optional[BBSqueezeConfig] = None
     grid: Optional[GridConfig] = None
+    dynamic_risk_leverage: Optional[DynamicRiskLeverageConfig] = None
 
 def load_strategy_config(filepath: str = "strategies.yaml") -> StrategiesConfig:
     try:
@@ -75,7 +123,8 @@ def load_strategy_config(filepath: str = "strategies.yaml") -> StrategiesConfig:
             volatility_breakout=VolatilityConfig(**data.get("strategies", {}).get("volatility_breakout", {})),
             scalping=ScalpingConfig(**data.get("strategies", {}).get("scalping", {})),
             bb_squeeze=BBSqueezeConfig(**data.get("strategies", {}).get("bb_squeeze", {})),
-            grid=GridConfig(**data.get("strategies", {}).get("grid", {}))
+            grid=GridConfig(**data.get("strategies", {}).get("grid", {})),
+            dynamic_risk_leverage=DynamicRiskLeverageConfig(**data.get("strategies", {}).get("dynamic_risk_leverage", {}))
         )
         return config
     except Exception as e:

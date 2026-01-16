@@ -1,6 +1,4 @@
-import aiohttp
 import asyncio
-import aiohttp
 import json
 from typing import Optional, Dict, List, Any
 from urllib.parse import urlencode
@@ -29,66 +27,74 @@ class BybitClient:
         return self._session
 
     async def close(self):
-        if self._session:
+        if self._session and not self._session.closed:
             await self._session.close()
 
-    async def _request(self, method: str, endpoint: str, payload: Dict[str, Any] = None, suppress_error_log: bool = False) -> Any:
+    async def _request(self, method: str, endpoint: str, payload: Dict[str, Any] = None, params: Dict[str, Any] = None, suppress_error_log: bool = False) -> Any:
+        url = self.base_url + endpoint
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        # Add authentication for private endpoints
+        if endpoint.startswith("/v5/") and not endpoint.startswith("/v5/market/"):
+            auth = Authentication(self.api_key, self.api_secret)
+            timestamp = str(auth._get_timestamp())
+            recv_window = str(5000)
+            if payload is None:
+                payload_str = ""
+            else:
+                payload_str = json.dumps(payload, separators=(",", ":"))
+            
+            sign = auth._sign(payload_str + timestamp + recv_window)
+            headers.update({
+                "X-BAPI-API-KEY": self.api_key,
+                "X-BAPI-SIGN": sign,
+                "X-BAPI-SIGN-TYPE": "2",
+                "X-BAPI-TIMESTAMP": timestamp,
+                "X-BAPI-RECV-WINDOW": recv_window
+            })
+
         session = await self._get_session()
         
-        # Prepare Payload
-        payload_str = ""
-        if method == "GET":
-            if payload:
-                # Sort params for consistent signature
-                payload_str = urlencode(sorted(payload.items()))
-        else:
-            if payload:
-                payload_str = json.dumps(payload)
-        
-        # Generate Headers
-        headers = Authentication.generate_signature(self.api_key, self.api_secret, payload_str)
-        
-        url = self.base_url + endpoint
-        if method == "GET" and payload_str:
-            url = f"{url}?{payload_str}"
-            
-        logger.debug("api_request", method=method, url=url)
-        
         try:
-            async with session.request(method, url, data=payload_str if method != "GET" else None, headers=headers) as response:
-                text = await response.text()
-                try:
-                    data = json.loads(text)
-                except json.JSONDecodeError:
-                    raise APIError(f"Invalid JSON: {text}", -1, response.status)
-                
-                if data.get("retCode") != 0:
-                     if not suppress_error_log:
-                        logger.error("api_error", ret_code=data.get("retCode"), ret_msg=data.get("retMsg"))
-                     raise APIError(data.get("retMsg"), data.get("retCode"), response.status)
-                
-                return data.get("result")
-        except aiohttp.ClientError as e:
-            logger.error("network_error", error=str(e))
-            raise AntigravityError(f"Network error: {str(e)}")
+            if method == "GET":
+                if params:
+                    url += "?" + urlencode(params)
+                async with session.get(url, headers=headers) as response:
+                    data = await response.json()
+                    if response.status != 200:
+                        raise APIError(f"HTTP {response.status}: {data}")
+                    return data.get("result", data)
+            elif method == "POST":
+                async with session.post(url, headers=headers, json=payload) as response:
+                    data = await response.json()
+                    if response.status != 200:
+                        raise APIError(f"HTTP {response.status}: {data}")
+                    return data.get("result", data)
+        except Exception as e:
+            if not suppress_error_log:
+                logger.error("api_request_failed", method=method, url=url, error=str(e))
+            raise
 
     async def get_kline(self, symbol: str, interval: str, limit: int = 200) -> List[Dict]:
         """
-        Get Kline (Candlestick) data.
+        Get Kline data.
         """
         endpoint = "/v5/market/kline"
         params = {
             "category": "linear",
             "symbol": symbol,
             "interval": interval,
-            "limit": limit
+            "limit": str(limit)
         }
+        
         res = await self._request("GET", endpoint, params)
-        return res.get("list", [])
+        return res.get("list", []) if res else []
 
     async def place_order(self, category: str, symbol: str, side: str, orderType: str, qty: str, price: str = None, timeInForce: str = "GTC") -> Dict:
         """
-        Place a new order.
+        Place Order.
         """
         endpoint = "/v5/order/create"
         payload = {
@@ -99,6 +105,7 @@ class BybitClient:
             "qty": qty,
             "timeInForce": timeInForce
         }
+        
         if price:
             payload["price"] = price
 
@@ -151,23 +158,21 @@ class BybitClient:
             params["symbol"] = symbol
 
         res = await self._request("GET", endpoint, params)
-        return res.get("list", [])
+        return res.get("list", []) if res else []
 
     async def get_open_orders(self, category: str = "linear", symbol: str = None) -> List[Dict]:
         """
-        Get Real-time Open Orders.
+        Get Open Orders.
         """
         endpoint = "/v5/order/realtime"
         params = {
-            "category": category,
+            "category": category
         }
         if symbol:
             params["symbol"] = symbol
-        elif category == "linear":
-            params["settleCoin"] = "USDT"
 
         res = await self._request("GET", endpoint, params)
-        return res.get("list", [])
+        return res.get("list", []) if res else []
 
     async def get_closed_pnl(self, category: str = "linear", symbol: str = None, limit: int = 50) -> List[Dict]:
         """
@@ -186,25 +191,25 @@ class BybitClient:
         res = await self._request("GET", endpoint, params)
         return res.get("list", [])
 
-    async def set_leverage(self, category: str = "linear", symbol: str = "", leverage: str = "") -> bool:
+    async def set_leverage(self, category: str = "linear", symbol: str = "", buyLeverage: str = "", sellLeverage: str = "") -> bool:
         """
         Set Leverage for a symbol.
         """
         endpoint = "/v5/position/set-leverage"
-        # Convert to float for proper numeric format
-        leverage_num = float(leverage) if leverage else 1.0
         payload = {
             "category": category,
-            "symbol": symbol,
-            "leverage": leverage_num  # Send as number, not string
+            "symbol": symbol
         }
+        
+        # Set leverage for both buy and sell sides
+        if buyLeverage:
+            payload["buyLeverage"] = buyLeverage
+        if sellLeverage:
+            payload["sellLeverage"] = sellLeverage
             
         try:
-            logger.info(f"set_leverage_attempt", symbol=symbol, leverage=leverage, payload=payload)
             res = await self._request("POST", endpoint, payload)
-            logger.info(f"set_leverage_response", symbol=symbol, response=res)
             return res and res.get("retCode") == 0
         except Exception as e:
-            logger.error("set_leverage_failed", symbol=symbol, leverage=leverage, error=str(e))
+            logger.error("set_leverage_failed", symbol=symbol, leverage=buyLeverage, error=str(e))
             return False
-
