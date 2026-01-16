@@ -9,6 +9,7 @@ from antigravity.event import MarketDataEvent, KlineEvent, OrderUpdateEvent
 from antigravity.strategies.config import DynamicRiskLeverageConfig
 from antigravity.logging import get_logger
 from antigravity.performance_tracker import PerformanceTracker, Trade, TradeResult
+from antigravity.config import settings
 from datetime import datetime, timezone
 import uuid
 
@@ -472,7 +473,7 @@ class DynamicRiskLeverageStrategy(BaseStrategy):
             return None  # No signal in sideways market
         
         # Calculate position size based on risk and leverage
-        risk_amount = analysis.risk_percentage
+        risk_percentage = analysis.risk_percentage
         atr = analysis.technical_signals["atr"]
         stop_distance = atr * 1.5  # 1.5x ATR for stop loss
         
@@ -486,7 +487,16 @@ class DynamicRiskLeverageStrategy(BaseStrategy):
             stop_loss_price = current_price * (1 + stop_distance_pct)
         
         # Calculate quantity
-        quantity = risk_amount / stop_distance_pct
+        # Use MAX_POSITION_SIZE as the capital basis for risk calculation to ensure safety
+        risk_capital = settings.MAX_POSITION_SIZE * risk_percentage
+        stop_loss_value_per_unit = current_price * stop_distance_pct
+
+        # Calculate raw quantity based on risk
+        raw_quantity = risk_capital / stop_loss_value_per_unit if stop_loss_value_per_unit > 0 else 0
+
+        # Cap at MAX_POSITION_SIZE
+        max_qty_allowed = settings.MAX_POSITION_SIZE / current_price
+        quantity = min(raw_quantity, max_qty_allowed)
         
         # Calculate take profit levels based on entry type
         tp_levels = self._calculate_take_profit_levels(
