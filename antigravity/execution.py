@@ -8,6 +8,8 @@ from antigravity.database import db
 from antigravity.audit import audit
 from antigravity.client import BybitClient
 from antigravity.event import event_bus, TradeClosedEvent
+import uuid
+import structlog
 
 logger = get_logger("execution")
 
@@ -174,11 +176,18 @@ class RealBroker:
     async def execute_order(self, signal: Signal, strategy_name: str):
         client = BybitClient()
         try:
+            # Generate Trace ID for logs if not present
+            trace_id = getattr(signal, "trace_id", str(uuid.uuid4()))
+
+            # Bind trace_id to logger context for this execution
+            # Note: structlog thread-local context binding works, but here we just pass it manually or bind logger
+            log = logger.bind(trace_id=trace_id, strategy=strategy_name)
+
             # 1. Fetch Available Balance (USDT)
             balance_data = await client.get_wallet_balance(coin="USDT")
             available_balance = self._parse_available_balance(balance_data)
 
-            logger.info("real_execution_start", symbol=signal.symbol, available_balance=available_balance)
+            log.info("real_execution_start", symbol=signal.symbol, available_balance=available_balance)
 
             # Check for existing position to determine intent (Open vs Close)
             positions = await client.get_positions(category="linear", symbol=signal.symbol)
@@ -233,16 +242,20 @@ class RealBroker:
                      return
 
                 # Place Order
+                # Idempotency: Generate orderLinkId
+                order_link_id = f"{trace_id}-buy"
+
                 res = await client.place_order(
                     category="linear",
                     symbol=signal.symbol,
                     side="Buy",
                     orderType="Market",
-                    qty=qty_str
+                    qty=qty_str,
+                    orderLinkId=order_link_id
                 )
 
                 if res and "orderId" in res:
-                    logger.info("real_buy_filled", order_id=res["orderId"], qty=qty_str)
+                    log.info("real_buy_filled", order_id=res["orderId"], qty=qty_str, order_link_id=order_link_id)
                     db.save_trade(signal.symbol, "BUY", price, float(qty_str), trade_size, strategy_name, exec_type="REAL")
                     
                     # Create partial take-profit orders if provided
@@ -265,16 +278,20 @@ class RealBroker:
 
                     logger.info("real_sell_closing_long", symbol=signal.symbol, size=qty_to_close)
 
+                    # Idempotency: Generate orderLinkId
+                    order_link_id = f"{trace_id}-close-long"
+
                     res = await client.place_order(
                         category="linear",
                         symbol=signal.symbol,
                         side="Sell",
                         orderType="Market",
-                        qty=qty_to_close
+                        qty=qty_to_close,
+                        orderLinkId=order_link_id
                     )
 
                     if res and "orderId" in res:
-                        logger.info("real_sell_close_filled", order_id=res["orderId"])
+                        log.info("real_sell_close_filled", order_id=res["orderId"], order_link_id=order_link_id)
 
                         # Estimate PnL
                         try:
@@ -327,18 +344,22 @@ class RealBroker:
                          logger.warning("real_sell_qty_zero", symbol=signal.symbol, qty=qty_str)
                          return
 
-                    logger.info("real_sell_opening_short", symbol=signal.symbol, qty=qty_str)
+                    log.info("real_sell_opening_short", symbol=signal.symbol, qty=qty_str)
+
+                    # Idempotency
+                    order_link_id = f"{trace_id}-open-short"
 
                     res = await client.place_order(
                         category="linear",
                         symbol=signal.symbol,
                         side="Sell",
                         orderType="Market",
-                        qty=qty_str
+                        qty=qty_str,
+                        orderLinkId=order_link_id
                     )
 
                     if res and "orderId" in res:
-                        logger.info("real_sell_short_filled", order_id=res["orderId"], qty=qty_str)
+                        log.info("real_sell_short_filled", order_id=res["orderId"], qty=qty_str, order_link_id=order_link_id)
                         db.save_trade(signal.symbol, "SELL", price, float(qty_str), trade_size, strategy_name, exec_type="REAL")
                         
                         # Create partial take-profit orders if provided

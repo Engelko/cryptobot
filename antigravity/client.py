@@ -5,6 +5,8 @@ import json
 from typing import Optional, Dict, List, Any
 from urllib.parse import urlencode
 
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 from antigravity.config import settings
 from antigravity.logging import get_logger
 from antigravity.auth import Authentication
@@ -32,7 +34,17 @@ class BybitClient:
         if self._session:
             await self._session.close()
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((aiohttp.ClientError, AntigravityError)),
+        reraise=True
+    )
     async def _request(self, method: str, endpoint: str, payload: Dict[str, Any] = None, suppress_error_log: bool = False) -> Any:
+        # Rate Limiting: Simple sleep to prevent bursting.
+        # Ideally this should be a token bucket.
+        await asyncio.sleep(0.05)
+
         session = await self._get_session()
         
         # Prepare Payload
@@ -86,7 +98,7 @@ class BybitClient:
         res = await self._request("GET", endpoint, params)
         return res.get("list", [])
 
-    async def place_order(self, category: str, symbol: str, side: str, orderType: str, qty: str, price: str = None, timeInForce: str = "GTC") -> Dict:
+    async def place_order(self, category: str, symbol: str, side: str, orderType: str, qty: str, price: str = None, timeInForce: str = "GTC", orderLinkId: str = None) -> Dict:
         """
         Place a new order.
         """
@@ -101,6 +113,8 @@ class BybitClient:
         }
         if price:
             payload["price"] = price
+        if orderLinkId:
+            payload["orderLinkId"] = orderLinkId
 
         res = await self._request("POST", endpoint, payload)
         return res
