@@ -289,8 +289,11 @@ class RealBroker:
                 log.info("fee_estimation", symbol=signal.symbol, side="Buy", fee=estimated_fee)
 
                 # Place Order
-                # Idempotency: Generate orderLinkId
-                order_link_id = f"{trace_id}-buy"
+                # Idempotency: Generate orderLinkId (max 45 chars)
+                # UUID is 36 chars. 36 + 4 ("-buy") = 40. Safe.
+                # But if trace_id is custom/longer, we truncate.
+                safe_trace_id = trace_id.replace("-", "")[:30]
+                order_link_id = f"{safe_trace_id}-buy"
 
                 res = await client.place_order(
                     category=category,
@@ -326,7 +329,8 @@ class RealBroker:
                     log.info("real_sell_closing_long", symbol=signal.symbol, size=qty_to_close)
 
                     # Idempotency: Generate orderLinkId
-                    order_link_id = f"{trace_id}-close-long"
+                    safe_trace_id = trace_id.replace("-", "")[:30]
+                    order_link_id = f"{safe_trace_id}-close-long"
 
                     res = await client.place_order(
                         category=category,
@@ -432,7 +436,8 @@ class RealBroker:
                     log.info("fee_estimation", symbol=signal.symbol, side="Sell", fee=estimated_fee)
 
                     # Idempotency
-                    order_link_id = f"{trace_id}-open-short"
+                    safe_trace_id = trace_id.replace("-", "")[:30]
+                    order_link_id = f"{safe_trace_id}-open-short"
 
                     res = await client.place_order(
                         category=category,

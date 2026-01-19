@@ -223,12 +223,21 @@ class RiskManager:
         client = BybitClient()
         try:
             balance_data = await client.get_wallet_balance(coin="USDT")
-            # Logic similar to RealBroker._parse_available_balance
+            # Logic MATCHING RealBroker._parse_available_balance to avoid 110007 mismatch
+
+            # 1. Unified Account
+            if "totalAvailableBalance" in balance_data and float(balance_data.get("totalAvailableBalance", 0)) > 0:
+                 return float(balance_data.get("totalAvailableBalance"))
+
             if "totalWalletBalance" in balance_data:
                  return float(balance_data.get("totalWalletBalance", 0.0))
+
+            # 2. Contract Account
             elif "coin" in balance_data:
                 for c in balance_data["coin"]:
                     if c.get("coin") == "USDT":
+                        if "availableToWithdraw" in c:
+                            return float(c.get("availableToWithdraw"))
                         return float(c.get("walletBalance", 0.0))
         except Exception as e:
             logger.error("risk_balance_fetch_error", error=str(e))
