@@ -68,6 +68,36 @@ class RiskManager:
         # 0. Check Reset
         self._check_reset()
 
+        # Check existing positions to allow "Reduce Only" trades
+        # If we are closing a position, we should usually allow it regardless of limits
+        is_reduce_only = False
+        try:
+            # We need to check actual exchange position to know if this reduces exposure.
+            # This is a bit heavy for RiskManager, but necessary for correctness.
+            # We assume RealBroker mode here mostly.
+            if not settings.SIMULATION_MODE:
+                client = BybitClient()
+                try:
+                    positions = await client.get_positions(category="linear", symbol=signal.symbol)
+                    for p in positions:
+                        size = float(p.get("size", 0))
+                        side = p.get("side")
+                        if size > 0:
+                            # If we have Long and signal is SELL -> Reduce
+                            if side == "Buy" and signal.type == SignalType.SELL:
+                                is_reduce_only = True
+                            # If we have Short and signal is BUY -> Reduce
+                            elif side == "Sell" and signal.type == SignalType.BUY:
+                                is_reduce_only = True
+                finally:
+                    await client.close()
+        except Exception as e:
+            logger.warning("risk_position_check_failed", error=str(e))
+
+        if is_reduce_only:
+            logger.info("risk_reduce_only_bypass", symbol=signal.symbol, type=signal.type)
+            return True
+
         # 1. Check Daily Loss Limit
         if self.current_daily_loss >= self.max_daily_loss:
             logger.warning("risk_block", reason="daily_loss_limit_exceeded", 

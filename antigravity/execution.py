@@ -195,7 +195,11 @@ class RealBroker:
             log.info("real_execution_start", symbol=signal.symbol, available_balance=available_balance)
 
             # Check for existing position to determine intent (Open vs Close)
-            positions = await client.get_positions(category=category, symbol=signal.symbol)
+            try:
+                positions = await client.get_positions(category=category, symbol=signal.symbol)
+            except Exception as e:
+                log.error("real_execution_abort_api_error", error=f"Failed to fetch positions: {str(e)}")
+                return
 
             long_pos = None
             short_pos = None
