@@ -101,7 +101,7 @@ class GridMasterImproved(BaseStrategy):
                 await self.save_state() # Persist state update
 
                 side_enum = SignalType(order["side"])
-                return Signal(side_enum, symbol, order["price"], quantity=self.amount_per_grid, reason=order["reason"])
+                return Signal(side_enum, symbol, order["price"], quantity=self.amount_per_grid, reason=order["reason"], leverage=self.config.leverage)
 
             # 2. Initialize
             if not state["initialized"]:
@@ -145,7 +145,7 @@ class GridMasterImproved(BaseStrategy):
                 # Pop it
                 state["pending_placements"].pop(0)
 
-                return Signal(side, symbol, level_price, quantity=self.amount_per_grid, reason=f"Grid Init {idx}")
+                return Signal(side, symbol, level_price, quantity=self.amount_per_grid, reason=f"Grid Init {idx}", leverage=self.config.leverage)
 
         return None
 
