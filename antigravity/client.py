@@ -244,6 +244,27 @@ class BybitClient:
                 logger.info("leverage_already_set", symbol=symbol, leverage=leverage_num)
                 return True
 
+            # If error is related to invalid leverage (e.g. decimal not supported), try integer fallback
+            # Common codes: 10001 (Params error), 110043 (Not modified - handled above)
+            if not leverage_num.is_integer():
+                fallback_leverage = str(int(leverage_num))
+                logger.info("set_leverage_fallback", symbol=symbol, original=leverage_str, fallback=fallback_leverage, error_code=e.code)
+
+                payload["buyLeverage"] = fallback_leverage
+                payload["sellLeverage"] = fallback_leverage
+
+                try:
+                    await self._request("POST", endpoint, payload)
+                    logger.info("set_leverage_fallback_success", symbol=symbol, leverage=fallback_leverage)
+                    return True
+                except APIError as e2:
+                    if e2.code == 110043:
+                        logger.info("leverage_already_set_fallback", symbol=symbol, leverage=fallback_leverage)
+                        return True
+                    logger.error("set_leverage_fallback_failed", symbol=symbol, code=e2.code, msg=str(e2))
+                except Exception as e2:
+                    logger.error("set_leverage_fallback_exception", symbol=symbol, error=str(e2))
+
             logger.error("set_leverage_api_error", symbol=symbol, code=e.code, msg=str(e))
             return False
 
