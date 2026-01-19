@@ -268,9 +268,19 @@ class RealBroker:
                     trade_size = qty * price
                 else:
                     # Legacy logic: Maximize trade
-                    trade_size = min(available_balance, max_size)
-                    if leverage_multiplier > 1.0:
-                        trade_size = min(trade_size * leverage_multiplier, max_size * leverage_multiplier)
+                    # STRICT FIX: MAX_POSITION_SIZE is NOTIONAL limit.
+                    # We can use up to max_size USDT of value.
+                    # Margin required = max_size / leverage.
+                    # If Margin required > Available Balance, we are limited by balance.
+
+                    # 1. Cap by Notional Limit (Budget)
+                    target_notional = max_size
+
+                    # 2. Cap by Available Margin
+                    # Max notional allowed by wallet = Balance * Leverage
+                    wallet_max_notional = available_balance * leverage_multiplier
+
+                    trade_size = min(target_notional, wallet_max_notional)
                     qty = trade_size / price
 
                 # Min Order Check
@@ -414,9 +424,15 @@ class RealBroker:
                         trade_size = qty * price
                     else:
                         # Legacy logic: Maximize trade
-                        trade_size = min(available_balance, max_size)
-                        if leverage_multiplier > 1.0:
-                            trade_size = min(trade_size * leverage_multiplier, max_size * leverage_multiplier)
+                        # STRICT FIX: MAX_POSITION_SIZE is NOTIONAL limit.
+
+                        # 1. Cap by Notional Limit (Budget)
+                        target_notional = max_size
+
+                        # 2. Cap by Available Margin
+                        wallet_max_notional = available_balance * leverage_multiplier
+
+                        trade_size = min(target_notional, wallet_max_notional)
                         qty = trade_size / price
 
                     if trade_size < 10.0:
