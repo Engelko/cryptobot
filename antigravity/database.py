@@ -78,6 +78,15 @@ class DBStrategyState(Base):
     state_json = Column(Text)
     updated_at = Column(DateTime, default=datetime.now)
 
+class DBMarketRegime(Base):
+    __tablename__ = 'market_regime'
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String)
+    regime = Column(String) # TRENDING_UP, TRENDING_DOWN, RANGING, VOLATILE
+    adx = Column(Float)
+    volatility = Column(Float)
+    updated_at = Column(DateTime, default=datetime.now)
+
 class Database:
     def __init__(self, db_path=None):
         if db_path is None:
@@ -213,6 +222,26 @@ class Database:
             session.commit()
         except Exception as e:
             logger.error("db_save_prediction_failed", error=str(e), symbol=symbol)
+            session.rollback()
+        finally:
+            session.close()
+
+    def save_market_regime(self, symbol, regime, adx, volatility):
+        session = self.Session()
+        try:
+            # Upsert
+            record = session.query(DBMarketRegime).filter_by(symbol=symbol).first()
+            if not record:
+                record = DBMarketRegime(symbol=symbol, regime=regime, adx=adx, volatility=volatility)
+                session.add(record)
+            else:
+                record.regime = regime
+                record.adx = adx
+                record.volatility = volatility
+                record.updated_at = datetime.now()
+            session.commit()
+        except Exception as e:
+            logger.error("db_save_regime_failed", error=str(e), symbol=symbol)
             session.rollback()
         finally:
             session.close()

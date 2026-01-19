@@ -12,7 +12,7 @@ from antigravity.config import settings
 from antigravity.client import BybitClient
 from antigravity.logging import configure_logging
 
-# Configure logging for dashboard (creates/writes to antigravity.log)
+# Configure logging for dashboard
 # Check if file handler already exists to avoid duplication on re-runs
 has_file_handler = False
 for h in logging.getLogger().handlers:
@@ -68,9 +68,6 @@ if settings.BYBIT_API_KEY:
             await client.close()
 
     try:
-        # Create a new loop for this sidebar fetch
-        # Note: In Streamlit, creating new loops can sometimes be tricky if one is already running,
-        # but here we are in the main script flow, not inside a callback.
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         balance_data = loop.run_until_complete(fetch_wallet_balance_only())
@@ -99,42 +96,126 @@ if auto_refresh:
     st.rerun()
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Market", "Live Portfolio", "Signals", "AI", "System", "Settings", "Help", "Diagnostics"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Market", "Strategies", "Live Portfolio", "Signals", "System", "Settings", "Diagnostics"])
 
 with tab1:
-    st.subheader("Live Market Data")
+    st.subheader("Market Regimes & Data")
 
-    # Symbol Selector
-    active_symbols = settings.TRADING_SYMBOLS
-    selected_symbol = st.selectbox("Select Pair", active_symbols, index=0)
+    col_m1, col_m2 = st.columns([1, 3])
 
-    try:
-        # Use parameterized query to be safe, though symbols come from config
-        df_kline = pd.read_sql(f"SELECT * FROM klines WHERE symbol='{selected_symbol}' ORDER BY ts DESC LIMIT 100", engine)
-        if not df_kline.empty:
-            df_kline = df_kline.sort_values("ts")
+    with col_m1:
+        st.markdown("### Regime Detection")
+        try:
+            df_regime = pd.read_sql("SELECT * FROM market_regime ORDER BY updated_at DESC", engine)
+            if not df_regime.empty:
+                # Deduplicate, keep latest per symbol
+                df_regime = df_regime.drop_duplicates(subset=['symbol'], keep='first')
 
-            # Convert to Datetime and adjust Timezone
-            ts_series = pd.to_datetime(df_kline['ts'], unit='ms', utc=True)
-            target_tz = os.getenv("TZ", "UTC")
-            try:
-                ts_series = ts_series.dt.tz_convert(target_tz)
-            except Exception as e:
-                logging.getLogger("dashboard").warning(f"Timezone conversion failed: {e}")
+                for _, row in df_regime.iterrows():
+                    regime = row['regime']
+                    color = "grey"
+                    if "TRENDING" in regime: color = "green"
+                    if "RANGING" in regime: color = "blue"
+                    if "VOLATILE" in regime: color = "red"
 
-            fig = go.Figure(data=[go.Candlestick(x=ts_series,
-                            open=df_kline['open'],
-                            high=df_kline['high'],
-                            low=df_kline['low'],
-                            close=df_kline['close'])])
-            fig.update_layout(height=500, title=f"{selected_symbol} Price Action ({target_tz})")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning(f"No Market Data Available for {selected_symbol} yet.")
-    except Exception as e:
-        st.error(f"Error loading Klines: {e}")
+                    st.markdown(f"**{row['symbol']}**")
+                    st.markdown(f":{color}[{regime}]")
+                    st.caption(f"ADX: {row['adx']:.1f} | Vol: {row['volatility']:.2f}%")
+                    st.divider()
+            else:
+                st.info("No regime data yet.")
+        except Exception as e:
+            st.error(f"DB Error: {e}")
+
+    with col_m2:
+        # Symbol Selector
+        active_symbols = settings.TRADING_SYMBOLS
+        selected_symbol = st.selectbox("Select Pair", active_symbols, index=0)
+
+        try:
+            from sqlalchemy import text
+            query = text("SELECT * FROM klines WHERE symbol=:symbol ORDER BY ts DESC LIMIT 100")
+            df_kline = pd.read_sql(query, engine, params={"symbol": selected_symbol})
+
+            if not df_kline.empty:
+                df_kline = df_kline.sort_values("ts")
+                ts_series = pd.to_datetime(df_kline['ts'], unit='ms', utc=True)
+
+                fig = go.Figure(data=[go.Candlestick(x=ts_series,
+                                open=df_kline['open'],
+                                high=df_kline['high'],
+                                low=df_kline['low'],
+                                close=df_kline['close'])])
+                fig.update_layout(height=500, title=f"{selected_symbol} Price Action")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning(f"No Market Data Available for {selected_symbol} yet.")
+        except Exception as e:
+            st.error(f"Error loading Klines: {e}")
 
 with tab2:
+    st.subheader("Strategy Configuration")
+
+    # Load YAML Configuration
+    yaml_config = load_strategies_config()
+    strategies_config = yaml_config.get("strategies", {})
+
+    # Display Active Strategies Summary
+    active_list = [k for k, v in strategies_config.items() if v.get("enabled", False)]
+    if active_list:
+        st.success(f"Active Strategies: {', '.join(active_list)}")
+    else:
+        st.warning("No strategies enabled.")
+
+    st.divider()
+
+    # Edit Configuration
+    with st.form("strat_config_form"):
+        st.markdown("### Manage Strategies")
+        updated_strategies = {}
+
+        # Iterate through strategies
+        for strat_key, strat_conf in strategies_config.items():
+            with st.expander(f"{strat_conf.get('name', strat_key.title())} ({'ON' if strat_conf.get('enabled') else 'OFF'})"):
+
+                # Enable Toggle
+                is_enabled = st.checkbox("Enabled", value=strat_conf.get("enabled", False), key=f"en_{strat_key}")
+                strat_conf["enabled"] = is_enabled
+
+                # Dynamic Fields based on existing keys
+                # We skip 'enabled' and 'name' as they are handled or fixed
+                col1, col2 = st.columns(2)
+                keys = list(strat_conf.keys())
+                for i, key in enumerate(keys):
+                    if key in ["enabled", "name"]: continue
+
+                    val = strat_conf[key]
+                    val_type = type(val)
+
+                    # Split into columns
+                    curr_col = col1 if i % 2 == 0 else col2
+
+                    with curr_col:
+                        if val_type == bool:
+                            strat_conf[key] = st.checkbox(key, value=val, key=f"{strat_key}_{key}")
+                        elif val_type == int:
+                            strat_conf[key] = st.number_input(key, value=val, step=1, key=f"{strat_key}_{key}")
+                        elif val_type == float:
+                            strat_conf[key] = st.number_input(key, value=val, format="%.4f", key=f"{strat_key}_{key}")
+                        else:
+                            strat_conf[key] = st.text_input(key, value=str(val), key=f"{strat_key}_{key}")
+
+            updated_strategies[strat_key] = strat_conf
+
+        submitted = st.form_submit_button("Save Strategy Changes")
+        if submitted:
+            yaml_config["strategies"] = updated_strategies
+            if save_strategies_config(yaml_config):
+                st.success("Strategies saved! Restart application to apply changes.")
+            else:
+                st.error("Failed to save.")
+
+with tab3:
     st.subheader("Live Portfolio (Bybit)")
 
     if not settings.BYBIT_API_KEY:
@@ -163,50 +244,41 @@ with tab2:
 
             # 0. Account Info
             if balance:
-                # Extract metrics based on Account Type
                 wb = 0.0
                 mb = 0.0
                 upnl = 0.0
-
-                # Case 1: Unified Trading Account (UTA)
+                # Unified vs Standard logic
                 if "totalWalletBalance" in balance:
                     wb = float(balance.get("totalWalletBalance", 0))
                     mb = float(balance.get("totalMarginBalance", 0))
-                    upnl = float(balance.get("totalPerpUPL", 0)) # Perp Unrealized PnL
-                    if upnl == 0:
-                         # Fallback if totalPerpUPL is not present (some versions)
-                         upnl = float(balance.get("totalUnrealisedPnl", 0))
-
-                # Case 2: Standard/Contract Account (Check 'coin' list)
+                    upnl = float(balance.get("totalPerpUPL", 0)) or float(balance.get("totalUnrealisedPnl", 0))
                 elif "coin" in balance:
                     for c in balance["coin"]:
                         if c.get("coin") == "USDT":
                             wb = float(c.get("walletBalance", 0))
                             upnl = float(c.get("unrealisedPnl", 0))
-                            # Margin Balance usually equals Equity in Standard if no isolated margin logic simpler
                             mb = float(c.get("equity", 0))
                             break
 
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Wallet Balance", f"${wb:.2f}")
-                col2.metric("Margin Balance", f"${mb:.2f}")
-                col3.metric("Unrealized PnL (Perp)", f"${upnl:.2f}", delta=f"{upnl:.2f}")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Wallet Balance", f"${wb:.2f}")
+                c2.metric("Margin Balance", f"${mb:.2f}")
+                c3.metric("Unrealized PnL", f"${upnl:.2f}", delta=f"{upnl:.2f}")
                 st.divider()
 
             # 1. Open Positions
-            st.markdown("### Open Positions (Linear/Futures)")
+            st.markdown("### Open Positions")
             if positions:
-                # Process data for display
                 pos_data = []
                 for p in positions:
                     pos_data.append({
                         "Symbol": p.get("symbol"),
                         "Side": p.get("side"),
                         "Size": p.get("size"),
-                        "Entry Price": p.get("avgPrice"),
-                        "Mark Price": p.get("markPrice"),
-                        "Unrealized PnL": p.get("unrealisedPnl"),
-                        "Leverage": p.get("leverage")
+                        "Entry": p.get("avgPrice"),
+                        "Mark": p.get("markPrice"),
+                        "UPnL": p.get("unrealisedPnl"),
+                        "Lev": p.get("leverage")
                     })
                 st.dataframe(pd.DataFrame(pos_data), use_container_width=True)
             else:
@@ -229,151 +301,90 @@ with tab2:
             else:
                 st.info("No Active Orders")
 
-            # 3. Closed PnL (History)
-            st.markdown("### Recent Closed PnL")
+            # 3. Closed PnL
+            st.markdown("### Recent Trades (Closed PnL)")
             if history:
                 hist_data = []
                 for h in history:
                     hist_data.append({
                         "Symbol": h.get("symbol"),
-                        "Order Type": h.get("orderType"),
                         "Side": h.get("side"),
                         "Qty": h.get("qty"),
                         "Exit Price": h.get("avgExitPrice"),
-                        "Closed PnL": h.get("closedPnl"),
+                        "PnL": h.get("closedPnl"),
                         "Time": pd.to_datetime(int(h.get("updatedTime")), unit="ms")
                     })
                 st.dataframe(pd.DataFrame(hist_data), use_container_width=True)
             else:
-                st.info("No Closed Positions in history")
+                st.info("No History")
 
         except Exception as e:
             st.error(f"Failed to fetch data: {e}")
 
-with tab3:
+with tab4:
     st.subheader("Strategy Signals")
     try:
         df_signals = pd.read_sql("SELECT * FROM signals ORDER BY created_at DESC LIMIT 50", engine)
         if not df_signals.empty:
-            st.dataframe(df_signals, use_container_width=True)
+            # Highlight Rejections
+            def highlight_rejected(row):
+                if "[REJECTED" in str(row['reason']):
+                    return ['background-color: #ffcccc'] * len(row)
+                return [''] * len(row)
+
+            st.dataframe(df_signals.style.apply(highlight_rejected, axis=1), use_container_width=True)
         else:
             st.info("No Signals Generated yet.")
     except Exception as e:
         st.error(f"Error loading Signals: {e}")
 
-with tab4:
-    st.subheader("AI Copilot Sentiment")
-    try:
-        df_sentiment = pd.read_sql("SELECT * FROM sentiment ORDER BY created_at DESC LIMIT 1", engine)
-        if not df_sentiment.empty:
-            latest = df_sentiment.iloc[0]
-            st.metric("Sentiment Score", f"{latest['score']:.2f}")
-            st.markdown(f"**Reasoning:** {latest['reasoning']}")
-            st.caption(f"Model: {latest['model']}")
-        else:
-            st.info("AI Analysis Pernding...")
-    except Exception as e:
-        st.error(f"Error loading Sentiment: {e}")
-
 with tab5:
     st.subheader("System Health")
 
-    # Load real active strategies from YAML
-    sys_yaml_config = load_strategies_config()
-    sys_strategies_config = sys_yaml_config.get("strategies", {})
-    active_strategies_list = [
-        conf.get("name", key)
-        for key, conf in sys_strategies_config.items()
-        if conf.get("enabled", False)
-    ]
-
     st.json({
-        "Status": "Online",
         "Mode": "Simulation (Paper)" if settings.SIMULATION_MODE else "Live Trading",
+        "Market Type": getattr(settings, "DEFAULT_MARKET_TYPE", "linear"),
         "Risk Manager": "Active",
         "Database": "Connected",
-        "Active Strategies": active_strategies_list,
         "Environment": settings.ENVIRONMENT
     })
 
-    st.subheader("Configuration (Read-only)")
-    st.text(f"Config Source: .env file")
-    st.text(f"Max Daily Loss: ${settings.MAX_DAILY_LOSS}")
-    st.text(f"Max Position Size: ${settings.MAX_POSITION_SIZE}")
+    st.subheader("Risk State")
+    try:
+        df_risk = pd.read_sql("SELECT * FROM risk_state", engine)
+        st.dataframe(df_risk)
+    except:
+        st.warning("Could not load risk state")
 
 with tab6:
-    st.subheader("Settings Configuration")
-    st.info("Note: Changes require an application restart to take effect.")
+    st.subheader("Global Settings (.env)")
 
-    # Load YAML Configuration
-    yaml_config = load_strategies_config()
-    strategies_config = yaml_config.get("strategies", {})
-
-    with st.form("config_form"):
-        # Trading Symbols
-        # Convert list to comma-separated string for editing
+    with st.form("global_config_form"):
         current_symbols = settings.TRADING_SYMBOLS
         if isinstance(current_symbols, list):
             current_symbols_str = ", ".join(current_symbols)
         else:
             current_symbols_str = str(current_symbols)
 
-        new_symbols_str = st.text_input("Trading Symbols (comma separated)", value=current_symbols_str)
+        new_symbols_str = st.text_input("Trading Symbols", value=current_symbols_str)
+        new_max_daily = st.number_input("Max Daily Loss", value=float(settings.MAX_DAILY_LOSS))
+        new_max_pos = st.number_input("Max Position Size", value=float(settings.MAX_POSITION_SIZE))
 
-        st.divider()
-        st.markdown("### Strategy Configuration (New Architecture)")
-
-        # Dynamic Strategy Controls
-        updated_strategies = {}
-
-        # Define pretty names or use keys
-        for strat_key, strat_conf in strategies_config.items():
-            st.markdown(f"**{strat_conf.get('name', strat_key.title())}**")
-            col_en, col_p = st.columns([1, 3])
-
-            with col_en:
-                is_enabled = st.checkbox("Enabled", value=strat_conf.get("enabled", False), key=f"en_{strat_key}")
-                strat_conf["enabled"] = is_enabled
-
-            # Special Handling for Grid
-            if strat_key == "grid":
-                with st.expander("Grid Parameters", expanded=True):
-                    g_lower = st.number_input("Lower Price", value=float(strat_conf.get("lower_price", 0.0)), key="g_low")
-                    g_upper = st.number_input("Upper Price", value=float(strat_conf.get("upper_price", 0.0)), key="g_high")
-                    g_levels = st.number_input("Grid Levels", value=int(strat_conf.get("grid_levels", 10)), key="g_lvl")
-                    g_amt = st.number_input("Amount per Grid", value=float(strat_conf.get("amount_per_grid", 0.001)), format="%.4f", key="g_amt")
-
-                    strat_conf["lower_price"] = g_lower
-                    strat_conf["upper_price"] = g_upper
-                    strat_conf["grid_levels"] = g_levels
-                    strat_conf["amount_per_grid"] = g_amt
-
-            updated_strategies[strat_key] = strat_conf
-            st.divider()
-
-        # Risk Management
-        st.markdown("### Global Risk Management")
-        new_max_daily_loss = st.number_input("Max Daily Loss (USDT)", value=float(settings.MAX_DAILY_LOSS))
-        new_max_position_size = st.number_input("Max Position Size (USDT)", value=float(settings.MAX_POSITION_SIZE))
-
-        submitted = st.form_submit_button("Save Configuration")
+        submitted = st.form_submit_button("Save Global Settings")
 
         if submitted:
+            # Update .env logic (Simplified)
             try:
-                # 1. Update .env file (Symbols & Risk)
                 env_path = ".env"
                 if not os.path.exists(env_path):
-                    with open(env_path, "w") as f:
-                        f.write("")
+                    with open(env_path, "w") as f: f.write("")
 
-                with open(env_path, "r") as f:
-                    lines = f.readlines()
+                with open(env_path, "r") as f: lines = f.readlines()
 
                 config_map = {
                     "TRADING_SYMBOLS": f'"{new_symbols_str}"',
-                    "MAX_DAILY_LOSS": str(new_max_daily_loss),
-                    "MAX_POSITION_SIZE": str(new_max_position_size)
-                    # Note: We no longer update ACTIVE_STRATEGIES in .env as YAML takes precedence
+                    "MAX_DAILY_LOSS": str(new_max_daily),
+                    "MAX_POSITION_SIZE": str(new_max_pos)
                 }
 
                 new_lines = []
@@ -385,165 +396,28 @@ with tab6:
                     else:
                         new_lines.append(line)
 
-                for key, val in config_map.items():
-                    new_lines.append(f"{key}={val}\n")
+                for k, v in config_map.items():
+                    new_lines.append(f"{k}={v}\n")
 
-                with open(env_path, "w") as f:
-                    f.writelines(new_lines)
-
-                # 2. Update strategies.yaml
-                yaml_config["strategies"] = updated_strategies
-                if save_strategies_config(yaml_config):
-                    st.success("Configuration saved! Please restart the application.")
-                else:
-                    st.warning("Saved .env but failed to save strategies.yaml.")
-
+                with open(env_path, "w") as f: f.writelines(new_lines)
+                st.success("Saved! Restart required.")
             except Exception as e:
-                st.error(f"Failed to save configuration: {e}")
+                st.error(f"Error saving .env: {e}")
 
 with tab7:
-    st.subheader("User Guide")
-    st.markdown("""
-    ### How to use Project Antigravity
-
-    **1. Architecture**
-    This application is an **automated trading engine**, not a manual terminal.
-    It runs autonomously based on the strategies defined in the code and configuration settings.
-
-    **2. Configuration**
-    All settings (API keys, Risk limits, Strategy parameters) are managed via the `.env` file in the project root.
-    To change settings:
-    1. Stop the application.
-    2. Edit `.env`.
-    3. Restart the application.
-
-    **3. Strategies**
-    You can select active strategies in the **Settings** tab.
-
-    *   **MACD_Trend (Moving Average Convergence Divergence):**
-        *   **Logic:** A trend-following momentum indicator.
-        *   **Buy Signal:** When the MACD line crosses *above* the Signal line (Bullish Crossover).
-        *   **Sell Signal:** When the MACD line crosses *below* the Signal line (Bearish Crossover).
-        *   **Purpose:** Captures price trends.
-
-    *   **RSI_Reversion (Relative Strength Index):**
-        *   **Logic:** A momentum oscillator measuring the speed and change of price movements.
-        *   **Buy Signal:** When RSI drops below 30 (Oversold), indicating the price might bounce back up.
-        *   **Sell Signal:** When RSI rises above 70 (Overbought), indicating the price might drop.
-        *   **Purpose:** Captures potential reversals in price.
-
-    *   **Volatility Breakout (ATR):**
-        *   **Logic:** Uses Average True Range (ATR) to detect explosive price movements.
-        *   **Signal:** Enters when price breaks out of a defined range by a multiple of the ATR.
-        *   **Purpose:** Catching strong breakout trends early.
-
-    *   **Scalping (Stochastic):**
-        *   **Logic:** High-frequency trading based on overbought/oversold conditions in short timeframes.
-        *   **Signal:** Uses Stochastic Oscillator (K% and D% lines) to find quick entry/exit points.
-        *   **Purpose:** Profiting from small price changes in ranging markets.
-
-    *   **BB Squeeze (Volatility):**
-        *   **Logic:** Identifies periods of low volatility (squeeze) followed by high volatility (expansion).
-        *   **Signal:** Bollinger Bands narrow inside Keltner Channels, then expand.
-        *   **Purpose:** Positioning for a major move after a quiet period.
-
-    *   **Grid Trading (Range):**
-        *   **Logic:** Places a mesh of Buy and Sell limit orders within a defined price range.
-        *   **Strategy:** Buys low and sells high automatically as price oscillates.
-        *   **Configuration:** Set 'Lower Price' and 'Upper Price' in Settings to define the playing field.
-        *   **Purpose:** Passive income in sideways/choppy markets.
-
-    **4. Portfolio & Signals**
-    *   **Live Portfolio (Bybit):** This tab shows real-time data from your Bybit account (Wallet Balance, Positions, Orders, History). If you see "API Key not found", configure it in the Settings or .env file.
-    *   **Strategy Signals:** This tab lists the raw opportunities identified by the strategies.
-
-    **5. Configuration**
-    Use the **Settings** tab to change:
-    *   **Trading Symbols:** Comma-separated list (e.g., `BTCUSDT, ETHUSDT`).
-    *   **Active Strategies:** Select which strategies to run.
-    *   **Risk Limits:** Set Max Daily Loss and Position Size.
-
-    **6. Control**
-    - **Dashboard**: Use this interface to monitor performance.
-    - **Trading**: The bot executes trades automatically. Manual intervention is done by stopping the bot or using the Exchange interface directly.
-    """)
-
-with tab8:
     st.subheader("System Diagnostics")
 
-    # 1. Real-time Logs
-    st.markdown("### Real-time Logs")
-    col_log1, col_log2 = st.columns([1, 4])
-    with col_log1:
-        if st.button("Refresh Logs"):
-            st.rerun()
-    with col_log2:
-        if st.button("Ping Log (Write Test Entry)"):
-            logging.getLogger("dashboard").info("Diagnostics: Test Log Entry from Dashboard")
-            st.rerun()
+    # Logs
+    if st.button("Refresh Logs"):
+        st.rerun()
 
     log_file = "storage/antigravity.log"
     if os.path.exists(log_file):
         try:
             with open(log_file, "r") as f:
-                lines = f.readlines()
-                last_lines = "".join(lines[-50:]) # Last 50 lines
-                st.code(last_lines, language="text")
-        except Exception as e:
-            st.error(f"Could not read log file: {e}")
+                lines = f.readlines()[-50:]
+                st.code("".join(lines))
+        except:
+            st.error("Log read error")
     else:
-        st.warning("Log file not found yet. Start the application to generate logs.")
-
-    st.divider()
-
-    # 2. Manual Order Test
-    st.markdown("### Test Order Execution")
-    st.info("Use this form to test if the bot can successfully place an order on Bybit.")
-
-    with st.form("test_order_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-             test_symbol = st.selectbox("Symbol", settings.TRADING_SYMBOLS, key="test_symbol")
-             test_side = st.selectbox("Side", ["Buy", "Sell"], key="test_side")
-        with col2:
-             test_type = st.selectbox("Type", ["Limit", "Market"], key="test_type")
-             test_qty = st.text_input("Quantity", value="0.001", key="test_qty") # Text input for precision
-
-        test_price = st.text_input("Price (Limit Only)", value="0", key="test_price")
-
-        submit_test = st.form_submit_button("Place Test Order")
-
-        if submit_test:
-            async def place_test_order():
-                client = BybitClient()
-                try:
-                    p = None
-                    if test_type == "Limit":
-                        p = test_price
-
-                    res = await client.place_order(
-                        category="linear",
-                        symbol=test_symbol,
-                        side=test_side,
-                        orderType=test_type,
-                        qty=test_qty,
-                        price=p
-                    )
-                    return res
-                except Exception as e:
-                    return f"Error: {e}"
-                finally:
-                    await client.close()
-
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                result = loop.run_until_complete(place_test_order())
-                loop.close()
-
-                if isinstance(result, dict) and "orderId" in result:
-                    st.success(f"Order Placed Successfully! Order ID: {result['orderId']}")
-                else:
-                    st.error(f"Order Failed: {result}")
-            except Exception as e:
-                st.error(f"Execution Error: {e}")
+        st.warning("No log file found.")
