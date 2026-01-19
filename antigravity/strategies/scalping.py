@@ -4,6 +4,10 @@ from typing import Optional, List
 from antigravity.strategy import BaseStrategy, Signal, SignalType
 from antigravity.event import MarketDataEvent, KlineEvent
 from antigravity.strategies.config import ScalpingConfig
+from antigravity.market_regime import market_regime_detector, MarketRegime
+from antigravity.logging import get_logger
+
+logger = get_logger("strategy_scalping")
 
 class ScalpingStrategy(BaseStrategy):
     def __init__(self, config: ScalpingConfig, symbols: List[str]):
@@ -26,6 +30,12 @@ class ScalpingStrategy(BaseStrategy):
 
             if len(self.klines[event.symbol]) > self.min_klines + 100:
                 self.klines[event.symbol].pop(0)
+
+            # Regime Filter: Block if Volatile (Risk of slippage/whipsaw)
+            regime_data = market_regime_detector.regimes.get(event.symbol)
+            if regime_data and regime_data.regime == MarketRegime.VOLATILE:
+                logger.debug("scalping_regime_block", symbol=event.symbol, regime="VOLATILE")
+                return None
 
             return self._calculate_signal(event.symbol)
         return None

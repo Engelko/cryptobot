@@ -43,9 +43,29 @@ The trading system has been upgraded to a **Futures-First** architecture with na
 *   **Why:** Protects capital during false breakouts and secures profits in strong trends.
 *   **Regime:** Restricted to `TRENDING` markets by the Router.
 
-### Other Strategies
-*   All strategies now benefit from the global **Risk Manager** checks (Max Daily Loss, Max Position Size).
-*   All strategies are subject to **Fee Estimation** in the execution layer.
+### BB Squeeze (`BBSqueezeStrategy`)
+*   **Upgrade:** Added Regime Filter.
+*   **Logic:** Blocks signals if the market is already in a `VOLATILE` state.
+*   **Why:** Captures the breakout *before* it happens. Entering during high volatility often leads to buying the top (FOMO).
+
+### Mean Reversion (`BollingerRSIImproved`)
+*   **Upgrade:** Added Regime Filter.
+*   **Logic:** Blocks signals if the market is in `TRENDING_UP` or `TRENDING_DOWN`.
+*   **Why:** Prevents "catching a falling knife" or shorting a strong bull run. Only trades when the market is sideways (`RANGING`).
+
+### Scalping (`ScalpingStrategy`)
+*   **Upgrade:** Added Regime Filter.
+*   **Logic:** Blocks signals if the market is `VOLATILE`.
+*   **Why:** High volatility increases slippage, which kills the edge of small-profit scalping strategies.
+
+### Volatility Breakout (`VolatilityBreakoutStrategy`)
+*   **Upgrade:** Added Regime Filter.
+*   **Logic:** Blocks signals if the market is `RANGING`.
+*   **Why:** Breakout strategies suffer from "whipsaws" (false breakouts) in ranging markets. This filter ensures we only trade when momentum is present.
+
+### Dynamic Risk Leverage (`DynamicRiskLeverageStrategy`)
+*   **Status:** Already includes advanced internal logic for Trend/Range detection.
+*   **Integration:** Now fully compatible with the global Risk Manager and Fee estimation.
 
 ## 4. Practical Recommendations
 

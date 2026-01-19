@@ -4,6 +4,10 @@ from typing import Optional, List
 from antigravity.strategy import BaseStrategy, Signal, SignalType
 from antigravity.event import MarketDataEvent, KlineEvent
 from antigravity.strategies.config import BBSqueezeConfig
+from antigravity.market_regime import market_regime_detector, MarketRegime
+from antigravity.logging import get_logger
+
+logger = get_logger("strategy_bb_squeeze")
 
 class BBSqueezeStrategy(BaseStrategy):
     def __init__(self, config: BBSqueezeConfig, symbols: List[str]):
@@ -26,6 +30,17 @@ class BBSqueezeStrategy(BaseStrategy):
 
             if len(self.klines[event.symbol]) > self.min_klines + 100:
                 self.klines[event.symbol].pop(0)
+
+            # Regime Filter: Block if already Volatile (missed entry or too risky)
+            regime_data = market_regime_detector.regimes.get(event.symbol)
+            if regime_data and regime_data.regime == MarketRegime.VOLATILE:
+                # Optional: Allow if we are already in a position (managed by Execution),
+                # but for new signals, we want to enter BEFORE volatility spikes.
+                # However, Breakout happens exactly when Volatility spikes.
+                # So we block only if Volatility is EXTREME (e.g. late stage).
+                # For now, strict check to adhere to "Regime Awareness".
+                logger.debug("bb_squeeze_regime_block", symbol=event.symbol, regime="VOLATILE")
+                return None
 
             return self._calculate_signal(event.symbol)
         return None

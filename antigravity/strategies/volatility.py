@@ -4,6 +4,10 @@ from typing import Optional, List
 from antigravity.strategy import BaseStrategy, Signal, SignalType
 from antigravity.event import MarketDataEvent, KlineEvent
 from antigravity.strategies.config import VolatilityConfig
+from antigravity.market_regime import market_regime_detector, MarketRegime
+from antigravity.logging import get_logger
+
+logger = get_logger("strategy_volatility_breakout")
 
 class VolatilityBreakoutStrategy(BaseStrategy):
     def __init__(self, config: VolatilityConfig, symbols: List[str]):
@@ -26,6 +30,12 @@ class VolatilityBreakoutStrategy(BaseStrategy):
 
             if len(self.klines[event.symbol]) > self.min_klines + 100:
                 self.klines[event.symbol].pop(0)
+
+            # Regime Filter: Block if Ranging (False breakout risk)
+            regime_data = market_regime_detector.regimes.get(event.symbol)
+            if regime_data and regime_data.regime == MarketRegime.RANGING:
+                logger.debug("volatility_breakout_regime_block", symbol=event.symbol, regime="RANGING")
+                return None
 
             return self._calculate_signal(event.symbol)
         return None
