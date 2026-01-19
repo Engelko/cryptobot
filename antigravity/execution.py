@@ -215,6 +215,17 @@ class RealBroker:
                     leverage_set_success = await self._set_leverage(signal.symbol, signal.leverage)
                     if not leverage_set_success:
                         log.error("leverage_set_failed_abort", symbol=signal.symbol, requested=signal.leverage)
+                        # Save execution failure to DB
+                        db.save_trade(
+                            symbol=signal.symbol,
+                            side="BUY",
+                            price=signal.price or 0.0,
+                            qty=0.0,
+                            val=0.0,
+                            strat=strategy_name,
+                            exec_type="FAILED",
+                            pnl=0.0
+                        )
                         # ABORT: Do not execute trade with incorrect leverage
                         return
                     else:
@@ -342,6 +353,17 @@ class RealBroker:
                         leverage_set_success = await self._set_leverage(signal.symbol, signal.leverage)
                         if not leverage_set_success:
                             log.error("leverage_set_failed_abort", symbol=signal.symbol, requested=signal.leverage)
+                            # Save execution failure to DB
+                            db.save_trade(
+                                symbol=signal.symbol,
+                                side="SELL",
+                                price=signal.price or 0.0,
+                                qty=0.0,
+                                val=0.0,
+                                strat=strategy_name,
+                                exec_type="FAILED",
+                                pnl=0.0
+                            )
                             # ABORT: Do not execute trade with incorrect leverage
                             return
                         else:

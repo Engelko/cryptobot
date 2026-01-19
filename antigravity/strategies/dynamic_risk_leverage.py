@@ -494,8 +494,8 @@ class DynamicRiskLeverageStrategy(BaseStrategy):
         # Calculate raw quantity based on risk
         raw_quantity = risk_capital / stop_loss_value_per_unit if stop_loss_value_per_unit > 0 else 0
 
-        # Cap at MAX_POSITION_SIZE
-        max_qty_allowed = settings.MAX_POSITION_SIZE / current_price
+        # Cap at 99% of MAX_POSITION_SIZE to account for slippage/price moves
+        max_qty_allowed = (settings.MAX_POSITION_SIZE * 0.99) / current_price
         quantity = min(raw_quantity, max_qty_allowed)
         
         # Calculate take profit levels based on entry type
