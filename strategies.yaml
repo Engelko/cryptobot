@@ -16,6 +16,7 @@ strategies:
     momentum_period: 12
     name: BBSqueeze
     risk_per_trade: 0.02
+    leverage: 1.0
   dynamic_risk_leverage:
     daily_loss_limit: 0.05
     ema_fast: 20
@@ -53,12 +54,14 @@ strategies:
     lower_price: 40000.0
     name: GridMaster
     upper_price: 50000.0
+    leverage: 1.0
   mean_reversion:
     bb_period: 20
     bb_std: 2.0
     enabled: false
     name: BollingerRSI
     risk_per_trade: 0.02
+    leverage: 1.0
     rsi_overbought: 70
     rsi_oversold: 30
     rsi_period: 14
@@ -70,11 +73,13 @@ strategies:
     overbought: 80
     oversold: 20
     risk_per_trade: 0.01
+    leverage: 1.0
   trend_following:
     enabled: false
     fast_period: 50
     name: GoldenCross
     risk_per_trade: 0.02
+    leverage: 1.0
     slow_period: 200
   volatility_breakout:
     atr_period: 14
@@ -82,3 +87,4 @@ strategies:
     multiplier: 3.0
     name: ATRBreakout
     risk_per_trade: 0.02
+    leverage: 1.0
