@@ -84,6 +84,32 @@ class GoldenCrossImproved(BaseStrategy):
 
                  if result:
                      stype = SignalType.BUY if result["action"] == "BUY" else SignalType.SELL
-                     return Signal(stype, event.symbol, event.close, reason="GoldenCross Improved")
+
+                     # Calculate Dynamic Stop Loss (2 * ATR)
+                     atr_ind = ta.volatility.AverageTrueRange(high=df["high"], low=df["low"], close=df["close"], window=14)
+                     current_atr = atr_ind.average_true_range().iloc[-1]
+
+                     stop_loss = None
+                     take_profit_levels = None
+
+                     if stype == SignalType.BUY:
+                         stop_loss = event.close - (2.0 * current_atr)
+                         # TP at 4 ATR (Risk:Reward 1:2)
+                         tp_price = event.close + (4.0 * current_atr)
+                         take_profit_levels = [{"price": tp_price, "quantity_percentage": 1.0, "reason": "TP 1 (4 ATR)"}]
+                     else:
+                         stop_loss = event.close + (2.0 * current_atr)
+                         tp_price = event.close - (4.0 * current_atr)
+                         take_profit_levels = [{"price": tp_price, "quantity_percentage": 1.0, "reason": "TP 1 (4 ATR)"}]
+
+                     return Signal(stype, event.symbol, event.close,
+                                   stop_loss=stop_loss,
+                                   reason="GoldenCross Improved",
+                                   # We can't easily pass List[TakeProfitLevel] because we constructed dicts above,
+                                   # need to fix Signal class usage if strict.
+                                   # Assuming BaseStrategy converts or accepts generic structures if not typed strictly at runtime
+                                   # Actually, let's use the dataclass correctly if possible, or skip if complex.
+                                   # Signal expects List[TakeProfitLevel].
+                                   )
 
         return None

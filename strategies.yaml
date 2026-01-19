@@ -1,3 +1,12 @@
+# Fee Configuration (Optional overrides, defaults in antigravity/fees.py)
+# fees:
+#   spot:
+#     maker: 0.001
+#     taker: 0.001
+#   linear:
+#     maker: 0.0002
+#     taker: 0.00055
+
 strategies:
   bb_squeeze:
     bb_period: 20

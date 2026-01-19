@@ -59,6 +59,14 @@ class TradeClosedEvent(Event):
     execution_type: str = ""
 
 @dataclass
+class FundingFeeEvent(Event):
+    """Event for Funding Fee payments."""
+    symbol: str = ""
+    funding_rate: float = 0.0
+    payment: float = 0.0
+    timestamp: int = 0
+
+@dataclass
 class OrderUpdateEvent(Event):
     """Event for order status updates (Filled, Cancelled, etc)."""
     symbol: str = ""

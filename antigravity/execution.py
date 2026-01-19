@@ -8,6 +8,7 @@ from antigravity.database import db
 from antigravity.audit import audit
 from antigravity.client import BybitClient
 from antigravity.event import event_bus, TradeClosedEvent
+from antigravity.fees import FeeConfig
 import uuid
 import structlog
 
@@ -175,6 +176,10 @@ class RealBroker:
     """
     async def execute_order(self, signal: Signal, strategy_name: str):
         client = BybitClient()
+        # Default to linear (Futures), but could support Spot if needed
+        # We assume linear for now as per main instruction, but will verify category support
+        category = getattr(settings, "DEFAULT_MARKET_TYPE", "linear")
+
         try:
             # Generate Trace ID for logs if not present
             trace_id = getattr(signal, "trace_id", str(uuid.uuid4()))
@@ -190,7 +195,7 @@ class RealBroker:
             log.info("real_execution_start", symbol=signal.symbol, available_balance=available_balance)
 
             # Check for existing position to determine intent (Open vs Close)
-            positions = await client.get_positions(category="linear", symbol=signal.symbol)
+            positions = await client.get_positions(category=category, symbol=signal.symbol)
 
             long_pos = None
             short_pos = None
@@ -211,7 +216,7 @@ class RealBroker:
                 leverage_multiplier = signal.leverage if signal.leverage is not None else 1.0
                 
                 # SET LEVERAGE ON EXCHANGE before placing order
-                if signal.leverage and signal.leverage > 0:
+                if category == "linear" and signal.leverage and signal.leverage > 0:
                     leverage_set_success = await self._set_leverage(signal.symbol, signal.leverage)
                     if not leverage_set_success:
                         log.error("leverage_set_failed_abort", symbol=signal.symbol, requested=signal.leverage)
@@ -275,12 +280,16 @@ class RealBroker:
                      log.warning("real_buy_qty_zero", symbol=signal.symbol, qty=qty_str)
                      return
 
+                # Calculate Estimated Fees
+                estimated_fee = FeeConfig.estimate_fee(float(qty_str), price, "linear", is_maker=False)
+                log.info("fee_estimation", symbol=signal.symbol, side="Buy", fee=estimated_fee)
+
                 # Place Order
                 # Idempotency: Generate orderLinkId
                 order_link_id = f"{trace_id}-buy"
 
                 res = await client.place_order(
-                    category="linear",
+                    category=category,
                     symbol=signal.symbol,
                     side="Buy",
                     orderType="Market",
@@ -316,7 +325,7 @@ class RealBroker:
                     order_link_id = f"{trace_id}-close-long"
 
                     res = await client.place_order(
-                        category="linear",
+                        category=category,
                         symbol=signal.symbol,
                         side="Sell",
                         orderType="Market",
@@ -334,8 +343,13 @@ class RealBroker:
                             qty_f = float(qty_to_close or 0)
                             pnl = (exit_p - entry) * qty_f
 
-                            db.save_trade(signal.symbol, "SELL", exit_p, qty_f, 0.0, strategy_name, exec_type="REAL", pnl=pnl)
-                            await event_bus.publish(TradeClosedEvent(symbol=signal.symbol, pnl=pnl, strategy=strategy_name, execution_type="REAL"))
+                            # Deduct Estimated Fees (Entry Taker + Exit Taker approx)
+                            fees = FeeConfig.estimate_fee(qty_f, entry, "linear") + FeeConfig.estimate_fee(qty_f, exit_p, "linear")
+                            net_pnl = pnl - fees
+                            log.info("real_pnl_calc", gross_pnl=pnl, fees=fees, net_pnl=net_pnl)
+
+                            db.save_trade(signal.symbol, "SELL", exit_p, qty_f, 0.0, strategy_name, exec_type="REAL", pnl=net_pnl)
+                            await event_bus.publish(TradeClosedEvent(symbol=signal.symbol, pnl=net_pnl, strategy=strategy_name, execution_type="REAL"))
                         except Exception:
                             pass
                     else:
@@ -349,7 +363,7 @@ class RealBroker:
                     leverage_multiplier = signal.leverage if signal.leverage is not None else 1.0
                     
                     # SET LEVERAGE ON EXCHANGE before placing order
-                    if signal.leverage and signal.leverage > 0:
+                    if category == "linear" and signal.leverage and signal.leverage > 0:
                         leverage_set_success = await self._set_leverage(signal.symbol, signal.leverage)
                         if not leverage_set_success:
                             log.error("leverage_set_failed_abort", symbol=signal.symbol, requested=signal.leverage)
@@ -409,11 +423,15 @@ class RealBroker:
 
                     log.info("real_sell_opening_short", symbol=signal.symbol, qty=qty_str)
 
+                    # Calculate Estimated Fees
+                    estimated_fee = FeeConfig.estimate_fee(float(qty_str), price, "linear", is_maker=False)
+                    log.info("fee_estimation", symbol=signal.symbol, side="Sell", fee=estimated_fee)
+
                     # Idempotency
                     order_link_id = f"{trace_id}-open-short"
 
                     res = await client.place_order(
-                        category="linear",
+                        category=category,
                         symbol=signal.symbol,
                         side="Sell",
                         orderType="Market",
