@@ -63,10 +63,10 @@ class ScalpingStrategy(BaseStrategy):
 
         # Buy: K crosses above D in oversold zone
         if prev["k"] < prev["d"] and curr["k"] > curr["d"] and curr["k"] < self.config.oversold:
-            return Signal(SignalType.BUY, symbol, curr["close"], reason="Stoch Buy")
+            return Signal(SignalType.BUY, symbol, curr["close"], reason="Stoch Buy", leverage=self.config.leverage)
 
         # Sell: K crosses below D in overbought zone
         if prev["k"] > prev["d"] and curr["k"] < curr["d"] and curr["k"] > self.config.overbought:
-            return Signal(SignalType.SELL, symbol, curr["close"], reason="Stoch Sell")
+            return Signal(SignalType.SELL, symbol, curr["close"], reason="Stoch Sell", leverage=self.config.leverage)
 
         return None

@@ -112,6 +112,7 @@ class GoldenCrossImproved(BaseStrategy):
                      return Signal(stype, event.symbol, event.close,
                                    stop_loss=stop_loss,
                                    take_profit_levels=tp_objects,
-                                   reason="GoldenCross Improved")
+                                   reason="GoldenCross Improved",
+                                   leverage=self.config.leverage)
 
         return None

@@ -112,6 +112,6 @@ class BollingerRSIImproved(BaseStrategy):
 
             if result:
                 stype = SignalType.BUY if result["action"] == "BUY" else SignalType.SELL
-                return Signal(stype, event.symbol, event.close, reason="BollingerRSI Improved")
+                return Signal(stype, event.symbol, event.close, reason="BollingerRSI Improved", leverage=self.config.leverage)
 
         return None

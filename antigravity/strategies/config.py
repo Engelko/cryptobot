@@ -11,6 +11,7 @@ class TrendConfig(BaseModel):
     fast_period: int = 50
     slow_period: int = 200
     risk_per_trade: float = 0.02
+    leverage: float = 1.0
 
 class MeanReversionConfig(BaseModel):
     enabled: bool = False
@@ -21,6 +22,7 @@ class MeanReversionConfig(BaseModel):
     bb_period: int = 20
     bb_std: float = 2.0
     risk_per_trade: float = 0.02
+    leverage: float = 1.0
 
 class VolatilityConfig(BaseModel):
     enabled: bool = False
@@ -28,6 +30,7 @@ class VolatilityConfig(BaseModel):
     atr_period: int = 14
     multiplier: float = 3.0
     risk_per_trade: float = 0.02
+    leverage: float = 1.0
 
 class ScalpingConfig(BaseModel):
     enabled: bool = False
@@ -37,6 +40,7 @@ class ScalpingConfig(BaseModel):
     overbought: int = 80
     oversold: int = 20
     risk_per_trade: float = 0.01
+    leverage: float = 1.0
 
 class BBSqueezeConfig(BaseModel):
     enabled: bool = False
@@ -46,6 +50,7 @@ class BBSqueezeConfig(BaseModel):
     keltner_multiplier: float = 1.5
     momentum_period: int = 12
     risk_per_trade: float = 0.02
+    leverage: float = 1.0
 
 class GridConfig(BaseModel):
     enabled: bool = False
@@ -54,6 +59,7 @@ class GridConfig(BaseModel):
     upper_price: float = 50000.0
     grid_levels: int = 10
     amount_per_grid: float = 0.001
+    leverage: float = 1.0
 
 class DynamicRiskLeverageConfig(BaseModel):
     enabled: bool = False
