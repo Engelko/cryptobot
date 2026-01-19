@@ -4,6 +4,7 @@ from typing import Optional, List, Dict
 from antigravity.strategy import BaseStrategy, Signal, SignalType
 from antigravity.event import MarketDataEvent, KlineEvent
 from antigravity.strategies.config import MeanReversionConfig
+from antigravity.market_regime import market_regime_detector, MarketRegime
 from antigravity.logging import get_logger
 
 logger = get_logger("strategy_mean_rev_improved")
@@ -72,6 +73,12 @@ class BollingerRSIImproved(BaseStrategy):
             })
             if len(self.klines[event.symbol]) > self.min_klines + 100:
                 self.klines[event.symbol].pop(0)
+
+            # Regime Filter: Block Mean Reversion in Strong Trend
+            regime_data = market_regime_detector.regimes.get(event.symbol)
+            if regime_data and regime_data.regime in [MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN]:
+                logger.debug("mean_reversion_regime_block", symbol=event.symbol, regime=regime_data.regime.value)
+                return None
 
             data = self.klines[event.symbol]
             if len(data) < self.min_klines: return None
