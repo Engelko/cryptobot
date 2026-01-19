@@ -214,8 +214,9 @@ class RealBroker:
                 if signal.leverage and signal.leverage > 0:
                     leverage_set_success = await self._set_leverage(signal.symbol, signal.leverage)
                     if not leverage_set_success:
-                        log.warning("leverage_set_failed_continue", symbol=signal.symbol, requested=signal.leverage)
-                        # Don't return! Continue with order execution anyway
+                        log.error("leverage_set_failed_abort", symbol=signal.symbol, requested=signal.leverage)
+                        # ABORT: Do not execute trade with incorrect leverage
+                        return
                     else:
                         log.info("leverage_set_success", symbol=signal.symbol, leverage=f"{signal.leverage}x")
                 
@@ -340,8 +341,9 @@ class RealBroker:
                     if signal.leverage and signal.leverage > 0:
                         leverage_set_success = await self._set_leverage(signal.symbol, signal.leverage)
                         if not leverage_set_success:
-                            log.warning("leverage_set_failed_continue", symbol=signal.symbol, requested=signal.leverage)
-                            # Don't return! Continue with order execution anyway
+                            log.error("leverage_set_failed_abort", symbol=signal.symbol, requested=signal.leverage)
+                            # ABORT: Do not execute trade with incorrect leverage
+                            return
                         else:
                             log.info("leverage_set_success", symbol=signal.symbol, leverage=f"{signal.leverage}x")
                     
