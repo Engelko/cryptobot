@@ -102,14 +102,16 @@ class GoldenCrossImproved(BaseStrategy):
                          tp_price = event.close - (4.0 * current_atr)
                          take_profit_levels = [{"price": tp_price, "quantity_percentage": 1.0, "reason": "TP 1 (4 ATR)"}]
 
+                     # Convert list of dicts to list of TakeProfitLevel objects
+                     tp_objects = []
+                     if take_profit_levels:
+                         from antigravity.strategy import TakeProfitLevel
+                         for tp in take_profit_levels:
+                             tp_objects.append(TakeProfitLevel(price=tp["price"], quantity_percentage=tp["quantity_percentage"], reason=tp["reason"]))
+
                      return Signal(stype, event.symbol, event.close,
                                    stop_loss=stop_loss,
-                                   reason="GoldenCross Improved",
-                                   # We can't easily pass List[TakeProfitLevel] because we constructed dicts above,
-                                   # need to fix Signal class usage if strict.
-                                   # Assuming BaseStrategy converts or accepts generic structures if not typed strictly at runtime
-                                   # Actually, let's use the dataclass correctly if possible, or skip if complex.
-                                   # Signal expects List[TakeProfitLevel].
-                                   )
+                                   take_profit_levels=tp_objects,
+                                   reason="GoldenCross Improved")
 
         return None

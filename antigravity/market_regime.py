@@ -92,6 +92,15 @@ class MarketRegimeDetector:
         )
 
         self.regimes[symbol] = data
+
+        # Persist to DB
+        # Avoid circular import by importing inside method if possible, or using db instance if safe
+        try:
+             from antigravity.database import db
+             db.save_market_regime(symbol, regime.value, adx, volatility_pct)
+        except Exception:
+             pass
+
         return data
 
 # Global Instance
