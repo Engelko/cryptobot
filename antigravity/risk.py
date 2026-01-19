@@ -8,6 +8,7 @@ from antigravity.execution import execution_manager
 from antigravity.database import db
 from antigravity.event import event_bus, TradeClosedEvent, on_event
 from antigravity.metrics import metrics
+from antigravity.fees import FeeConfig
 
 logger = get_logger("risk_manager")
 
@@ -73,7 +74,12 @@ class RiskManager:
                            current_loss=self.current_daily_loss, limit=self.max_daily_loss)
             return False
 
-        # 2. Check Position Size
+        # 2. Check Fees vs Edge (Basic)
+        # We don't have expected edge in signal yet, but we can ensure notional is high enough that fees don't eat it all.
+        # This is implicitly covered by MIN_ORDER_COST but let's be explicit if needed.
+        # For now, relying on MIN_ORDER_COST is enough for fees.
+
+        # 3. Check Position Size
         # If quantity is provided, we check against MAX_POSITION_SIZE and Available Balance.
         # If quantity is NOT provided, we check if we have minimum balance to execute ANY trade.
 
@@ -91,12 +97,16 @@ class RiskManager:
             # Check Account Balance (considering leverage)
             # If leverage is provided, we check MARGIN required, not full notional.
             leverage = signal.leverage if signal.leverage and signal.leverage > 0 else 1.0
+
+            # Fee Buffer: Reserve 1% for fees/slippage
+            balance_for_trading = available_balance * 0.99
+
             margin_required = notional / leverage
 
-            if margin_required > available_balance:
+            if margin_required > balance_for_trading:
                  # Instead of rejecting, we resize the signal to match available balance
                  # Max Notional = Balance * Leverage
-                 max_notional_allowed = available_balance * leverage
+                 max_notional_allowed = balance_for_trading * leverage
 
                  # Recalculate quantity
                  new_quantity = max_notional_allowed / signal.price
@@ -114,7 +124,7 @@ class RiskManager:
                              original_qty=signal.quantity,
                              new_qty=new_quantity,
                              reason="insufficient_balance_margin_limit",
-                             available_balance=available_balance,
+                             available_balance=balance_for_trading,
                              leverage=leverage)
 
                  signal.quantity = new_quantity

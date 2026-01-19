@@ -8,4 +8,5 @@ streamlit
 plotly
 sqlalchemy
 PyYAML
-pydantic-settings
+tenacity
+typing_extensions

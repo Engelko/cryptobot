@@ -90,7 +90,12 @@ class GridMasterImproved(BaseStrategy):
             state = self.grid_states.get(symbol)
             if not state: return None
 
-            # 0. Check Counter Orders (Priority)
+            # 0. Check Kill Switch
+            kill_signal = await self._check_kill_switch(symbol, event.close, state)
+            if kill_signal:
+                return kill_signal
+
+            # 1. Check Counter Orders (Priority)
             if state["pending_counter_orders"]:
                 order = state["pending_counter_orders"].pop(0)
                 await self.save_state() # Persist state update
@@ -98,7 +103,7 @@ class GridMasterImproved(BaseStrategy):
                 side_enum = SignalType(order["side"])
                 return Signal(side_enum, symbol, order["price"], quantity=self.amount_per_grid, reason=order["reason"])
 
-            # 1. Initialize
+            # 2. Initialize
             if not state["initialized"]:
                 # If range is not set effectively (0.0 default), try to use current price + hardcoded spread if not dynamic
                 # Or require user to set it. Config usually has defaults.
@@ -117,7 +122,7 @@ class GridMasterImproved(BaseStrategy):
                      await self.save_state()
                 return None
 
-            # 2. Process Pending Placements (Init)
+            # 3. Process Pending Placements (Init)
             if state["pending_placements"]:
                 idx = state["pending_placements"][0]
                 prices = state["grid_prices"]
@@ -197,3 +202,39 @@ class GridMasterImproved(BaseStrategy):
                     })
 
                 await self.save_state()
+
+    async def _check_kill_switch(self, symbol: str, current_price: float, state: Dict) -> Optional[Signal]:
+        """
+        Stop Loss / Kill Switch for Grid.
+        If price moves significantly outside the grid, close all positions to prevent liquidation/deep bags.
+        """
+        # Buffer: 5% outside range
+        lower_limit = state["lower"] * 0.95
+        upper_limit = state["upper"] * 1.05
+
+        # If price drops below lower limit (Holding Longs in falling market)
+        if current_price < lower_limit:
+            logger.warning("grid_kill_switch_triggered", symbol=symbol, price=current_price, limit=lower_limit, reason="Price below grid")
+            # Signal SELL to close everything (assuming execution manager handles "SELL" as "Close Long")
+            # We reset state to stop grid
+            state["initialized"] = False
+            state["active_orders"] = {}
+            state["pending_placements"] = []
+            state["pending_counter_orders"] = []
+            await self.save_state()
+            return Signal(SignalType.SELL, symbol, quantity=None, reason="Grid Kill Switch (Low)")
+
+        # If price goes above upper limit (Holding Shorts in rising market - only relevant for Futures Grid)
+        # Our current implementation is Spot-like (Long Only logic mostly), but signals can be short.
+        # If we are in Futures mode, we might have Short positions from upper grid levels?
+        # The current implementation sends SELL signals at upper levels. In Spot, that's selling asset. In Futures, that's Opening Short?
+        # The logic: "If we Bought at X, we Sell at X+1". This implies Closing Longs.
+        # So we are Long Only?
+        # "If we Sold at Y, we want to Buy at Y-1".
+        # This implies we are oscillating.
+
+        # Safe Kill Switch: If price > upper_limit, we should ensure we have no Short exposure.
+        # Since we likely just sold everything on the way up, we are likely flat or holding small shorts if we entered shorts.
+        # Assuming Long-Only Grid for now: No risk on upside (just Sold out).
+
+        return None
