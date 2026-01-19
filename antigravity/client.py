@@ -216,20 +216,26 @@ class BybitClient:
             logger.error("invalid_leverage_format", symbol=symbol, leverage=leverage)
             return False
 
+        # Format leverage string (remove trailing .0 for integers)
+        if leverage_num.is_integer():
+            leverage_str = str(int(leverage_num))
+        else:
+            leverage_str = str(leverage_num)
+
         # Bybit V5 requires buyLeverage and sellLeverage
         payload = {
             "category": category,
             "symbol": symbol,
-            "buyLeverage": str(leverage_num),
-            "sellLeverage": str(leverage_num)
+            "buyLeverage": leverage_str,
+            "sellLeverage": leverage_str
         }
             
         try:
-            logger.info("set_leverage_attempt", symbol=symbol, leverage=leverage_num, payload=payload)
+            logger.info("set_leverage_attempt", symbol=symbol, leverage=leverage_str, payload=payload)
             # _request raises APIError if retCode != 0
             res = await self._request("POST", endpoint, payload)
 
-            logger.info("set_leverage_success", symbol=symbol, leverage=leverage_num)
+            logger.info("set_leverage_success", symbol=symbol, leverage=leverage_str)
             return True
 
         except APIError as e:
