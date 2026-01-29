@@ -83,8 +83,9 @@ class BybitClient:
                 
                 return data.get("result")
         except aiohttp.ClientError as e:
-            logger.error("network_error", error=str(e))
-            raise AntigravityError(f"Network error: {str(e)}")
+            # Re-raise ClientError so tenacity can handle retries
+            logger.warning("network_error_retry", error=str(e))
+            raise e
 
     async def get_kline(self, symbol: str, interval: str, limit: int = 200) -> List[Dict]:
         """
