@@ -52,8 +52,8 @@ class TestLeverageFix(unittest.TestCase):
 
         self.assertIn("buyLeverage", payload)
         self.assertIn("sellLeverage", payload)
-        self.assertEqual(payload["buyLeverage"], "5.0")
-        self.assertEqual(payload["sellLeverage"], "5.0")
+        self.assertEqual(payload["buyLeverage"], "5")
+        self.assertEqual(payload["sellLeverage"], "5")
         self.assertNotIn("leverage", payload) # Ensure old key is NOT present
 
     @patch('antigravity.client.BybitClient._get_session')
