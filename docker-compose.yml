@@ -6,6 +6,7 @@ services:
     volumes:
       - ./storage:/app/storage
       - ./.env:/app/.env
+      - ./strategies.yaml:/app/strategies.yaml
     environment:
       - TZ=Europe/Moscow
       - DATABASE_URL=sqlite:///storage/data.db
@@ -20,6 +21,7 @@ services:
     volumes:
       - ./storage:/app/storage
       - ./.env:/app/.env
+      - ./strategies.yaml:/app/strategies.yaml
     environment:
       - TZ=Europe/Moscow
       - DATABASE_URL=sqlite:///storage/data.db
