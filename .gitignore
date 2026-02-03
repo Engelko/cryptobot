@@ -4,6 +4,7 @@ venv/
 *.pyc
 __pycache__/
 data.db
+storage/*.db*
 .streamlit/logs/
 
 # Environment Variables

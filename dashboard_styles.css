@@ -1,30 +1,44 @@
-/* Custom Inter Font */
+/* Custom Inter Font with Emoji Fallback */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 
 /* Global Styles */
 .stApp {
     background-color: #0E1117;
     color: #FAFAFA;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Segoe UI Emoji", "Apple Color Emoji", "Segoe UI Symbol", sans-serif !important;
+}
+
+/* Fix Sidebar Issues */
+section[data-testid="stSidebar"] {
+    background-color: #161B22 !important;
+    min-width: 300px !important;
+    max-width: 400px !important;
 }
 
 /* Critical Status Bar - Sticky */
 [data-testid="stHeader"] {
-    background-color: rgba(14, 17, 23, 0.8);
-    backdrop-filter: blur(10px);
+    background-color: rgba(14, 17, 23, 0.9) !important;
+    backdrop-filter: blur(12px) !important;
+    z-index: 1000 !important;
 }
 
 .sticky-header {
-    position: fixed;
+    position: sticky;
     top: 0;
-    left: 0;
-    right: 0;
-    z-index: 999;
+    z-index: 1001;
     background: #1E2128;
     padding: 10px 20px;
+    margin: -1rem -1rem 1rem -1rem; /* Offset Streamlit padding */
     border-bottom: 1px solid #30363D;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+}
+
+/* Adjust main content for sticky header */
+.main .block-container {
+    padding-top: 1rem !important;
 }
 
 /* Trading Mode Indicator */
@@ -34,20 +48,21 @@
 }
 
 .mode-badge {
-    padding: 8px 16px;
-    border-radius: 8px;
+    padding: 6px 14px;
+    border-radius: 6px;
     font-weight: 700;
-    font-size: 14px;
+    font-size: 12px;
     text-transform: uppercase;
-    border: 2px solid transparent;
-    opacity: 0.4;
-    transition: all 0.3s;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    opacity: 0.5;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .mode-badge.active {
     opacity: 1;
     border-color: currentColor;
-    box-shadow: 0 0 10px currentColor;
+    background-color: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
 }
 
 .mode-normal { color: #10B981; }
@@ -56,21 +71,21 @@
 
 /* Pulse Animation for Active Mode */
 @keyframes pulse {
-    0% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.8; transform: scale(1.02); }
-    100% { opacity: 1; transform: scale(1); }
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.05); opacity: 0.8; }
+    100% { transform: scale(1); opacity: 1; }
 }
 
 .mode-badge.active {
-    animation: pulse 2s infinite ease-in-out;
+    animation: pulse 3s infinite ease-in-out;
 }
 
 /* Alert Ticker */
 .alert-ticker-container {
-    background: #1E2128;
-    border-radius: 8px;
-    margin: 10px 0;
-    padding: 5px 15px;
+    background: #161B22;
+    border-radius: 6px;
+    margin: 15px 0;
+    padding: 8px 0;
     overflow: hidden;
     white-space: nowrap;
     border: 1px solid #30363D;
@@ -79,48 +94,75 @@
 .alert-ticker-content {
     display: inline-block;
     padding-left: 100%;
-    animation: ticker 40s linear infinite;
+    animation: ticker 45s linear infinite;
 }
 
 .alert-item {
     display: inline-block;
-    margin-right: 50px;
-    font-family: 'Inter', sans-serif;
+    margin-right: 60px;
     font-size: 13px;
+    color: #E6EDF3;
 }
 
 @keyframes ticker {
-    0% { transform: translate3d(0, 0, 0); }
-    100% { transform: translate3d(-100%, 0, 0); }
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-100%); }
 }
 
-/* Custom Metrics */
-.metric-card {
-    background: #1E2128;
-    padding: 20px;
-    border-radius: 12px;
-    border: 1px solid #30363D;
+/* Fix Button Visibility and Contrast */
+.stButton > button {
+    background-color: #238636 !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(240, 246, 252, 0.1) !important;
+    font-weight: 600 !important;
+    padding: 0.5rem 1rem !important;
+    border-radius: 6px !important;
+    transition: background-color 0.2s !important;
 }
 
-.metric-label {
-    font-size: 12px;
-    color: #9CA3AF;
-    margin-bottom: 4px;
+.stButton > button:hover {
+    background-color: #2ea043 !important;
+    border-color: #8b949e !important;
 }
 
-.metric-value {
-    font-size: 24px;
-    font-weight: 700;
-    color: #FAFAFA;
+.stButton > button:active {
+    background-color: #238636 !important;
 }
 
-/* Portfolio/Trade Tables */
-.stDataFrame {
-    border: 1px solid #30363D;
-    border-radius: 8px;
+/* Metrics Styling */
+[data-testid="stMetricValue"] {
+    font-size: 1.8rem !important;
+    font-weight: 700 !important;
 }
 
-/* Hide Streamlit elements */
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-header {visibility: hidden;}
+/* Fix Tab Contrast */
+button[data-baseweb="tab"] {
+    color: #8b949e !important;
+}
+
+button[data-baseweb="tab"][aria-selected="true"] {
+    color: #ffffff !important;
+    border-bottom-color: #1f6feb !important;
+}
+
+/* Hide Unwanted Streamlit Elements safely */
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+
+/* Do NOT hide header completely if it breaks things, but keep it clean */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .sticky-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 10px;
+    }
+    .main .block-container {
+        padding-top: 8rem !important;
+    }
+}
