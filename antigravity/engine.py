@@ -121,7 +121,7 @@ class StrategyEngine:
                 await onchain_analyzer.check_whale_activity()
             except Exception as e:
                 logger.error("onchain_loop_error", error=str(e))
-            await asyncio.sleep(3600) # Update hourly
+            await asyncio.sleep(300) # Check every 5 minutes (internal cache handles actual API calls)
 
     async def start(self):
         self._running = True

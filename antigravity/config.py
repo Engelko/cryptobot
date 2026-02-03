@@ -59,8 +59,8 @@ class Settings(BaseSettings):
     TELEGRAM_CHAT_ID: str = Field(default="", description="Telegram Chat ID")
 
     # On-chain Analysis
-    GLASSNODE_API_KEY: str = Field(default="", description="Glassnode API Key")
-    WHALE_ALERT_API_KEY: str = Field(default="", description="Whale Alert API Key")
+    COINGECKO_API_KEY: str = Field(default="", description="CoinGecko API Key (Demo/Pro)")
+    MESSARI_API_KEY: str = Field(default="", description="Messari API Key")
 
     def model_post_init(self, __context):
         # Handle string input for list if coming from .env as a string
