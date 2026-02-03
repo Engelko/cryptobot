@@ -25,7 +25,7 @@ st.set_page_config(
     page_title="Antigravity Mission Control",
     layout="wide",
     page_icon="🚀",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # Load Custom CSS
@@ -36,6 +36,9 @@ def load_css():
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
     else:
         st.warning("CSS file not found.")
+
+    # Force viewport meta for mobile scale stability
+    st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">', unsafe_allow_html=True)
 
 load_css()
 
@@ -157,7 +160,6 @@ st.markdown(f"""
         </div>
     </div>
 </div>
-<div style="margin-top: 80px;"></div>
 """, unsafe_allow_html=True)
 
 # Alert Ticker

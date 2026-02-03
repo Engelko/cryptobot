@@ -217,6 +217,12 @@ class RiskManager:
         return 0.0
 
     async def update_trading_mode(self):
+        """Update trading mode based on equity. Uses caching to prevent rate limits."""
+        # Check cache (1 minute)
+        now = time.time()
+        if hasattr(self, '_last_mode_check') and now - self._last_mode_check < 60:
+            return
+
         equity = await self.get_equity()
         equity_ratio = equity / self.initial_deposit if self.initial_deposit > 0 else 1.0
 
@@ -231,11 +237,16 @@ class RiskManager:
         else:
             self.trading_mode = TradingMode.NORMAL
 
+        self._last_mode_check = now
         logger.info("trading_mode_check", equity=equity, ratio=f"{equity_ratio:.2%}", mode=self.trading_mode.value)
 
     async def check_signal(self, signal: Signal) -> bool:
         self._check_reset()
-        await self.update_trading_mode()
+
+        # Only update trading mode if it's not already in EMERGENCY_STOP
+        # (or periodically as handled by update_trading_mode cache)
+        if self.trading_mode != TradingMode.EMERGENCY_STOP:
+            await self.update_trading_mode()
 
         if self.trading_mode == TradingMode.EMERGENCY_STOP:
             logger.critical("risk_block", reason="EMERGENCY_STOP", equity_ratio="<50%")

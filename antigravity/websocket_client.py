@@ -20,35 +20,52 @@ class BybitWebSocket:
         self._ping_task = None
 
     async def connect(self, topics: List[str]):
-        """Connect to WS and subscribe to topics."""
+        """Connect to WS and subscribe to topics with aggressive reconnection logic."""
         self._topics = topics
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
-        self._session = aiohttp.ClientSession(headers=headers)
         self._running = True
-        
+        reconnect_delay = 5
+        max_reconnect_delay = 60
+
         while self._running:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+
             try:
-                async with self._session.ws_connect(self.url) as ws:
+                if self._session is None or self._session.closed:
+                    self._session = aiohttp.ClientSession(headers=headers)
+
+                async with self._session.ws_connect(self.url, heartbeat=30) as ws:
                     self._ws = ws
                     logger.info("ws_connected", url=self.url)
+                    reconnect_delay = 5 # Reset delay on success
                     
                     # Subscribe
                     await self.subscribe(topics)
                     
                     # Start Ping Task
+                    if self._ping_task:
+                        self._ping_task.cancel()
                     self._ping_task = asyncio.create_task(self._keep_alive())
                     
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             await self._handle_message(msg.data)
+                        elif msg.type == aiohttp.WSMsgType.CLOSED:
+                            logger.warning("ws_connection_closed")
+                            break
                         elif msg.type == aiohttp.WSMsgType.ERROR:
                             logger.error("ws_error", error=str(ws.exception()))
                             break
             except Exception as e:
-                logger.error("ws_connection_error", error=str(e))
-                await asyncio.sleep(5)  # Reconnect delay
+                logger.error("ws_connection_failed", error=str(e), next_retry=f"{reconnect_delay}s")
+                if self._session and not self._session.closed:
+                    await self._session.close()
+                self._session = None # Force new session on next attempt
+
+            if self._running:
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
 
     async def subscribe(self, topics: List[str]):
         if not self._ws:

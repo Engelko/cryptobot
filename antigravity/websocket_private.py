@@ -23,16 +23,21 @@ class BybitPrivateWebSocket:
         self.api_secret = settings.BYBIT_API_SECRET
 
     async def connect(self):
-        """Connect to Private WS, Authenticate, and Subscribe."""
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
-        self._session = aiohttp.ClientSession(headers=headers)
+        """Connect to Private WS with aggressive reconnection and authentication."""
         self._running = True
+        reconnect_delay = 5
+        max_reconnect_delay = 60
 
         while self._running:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+
             try:
-                async with self._session.ws_connect(self.url) as ws:
+                if self._session is None or self._session.closed:
+                    self._session = aiohttp.ClientSession(headers=headers)
+
+                async with self._session.ws_connect(self.url, heartbeat=30) as ws:
                     self._ws = ws
                     logger.info("ws_private_connected", url=self.url)
 
@@ -40,23 +45,35 @@ class BybitPrivateWebSocket:
                     if await self._authenticate():
                         # Subscribe to private topics
                         await self.subscribe(["execution", "order"])
+                        reconnect_delay = 5 # Reset delay on success
 
                         # Start Ping Task
+                        if self._ping_task:
+                            self._ping_task.cancel()
                         self._ping_task = asyncio.create_task(self._keep_alive())
 
                         async for msg in ws:
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 await self._handle_message(msg.data)
+                            elif msg.type == aiohttp.WSMsgType.CLOSED:
+                                logger.warning("ws_private_closed")
+                                break
                             elif msg.type == aiohttp.WSMsgType.ERROR:
                                 logger.error("ws_private_error", error=str(ws.exception()))
                                 break
                     else:
                         logger.error("ws_private_auth_failed")
-                        await asyncio.sleep(10)
+                        await asyncio.sleep(reconnect_delay)
 
             except Exception as e:
-                logger.error("ws_private_connection_error", error=str(e))
-                await asyncio.sleep(5)  # Reconnect delay
+                logger.error("ws_private_connection_failed", error=str(e))
+                if self._session and not self._session.closed:
+                    await self._session.close()
+                self._session = None
+
+            if self._running:
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
 
     async def _authenticate(self) -> bool:
         if not self._ws:
