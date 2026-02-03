@@ -33,6 +33,7 @@ class Signal:
     leverage: Optional[float] = None
     risk_percentage: Optional[float] = None
     trailing_stop: Optional[bool] = False
+    category: str = "linear" # "linear" or "spot"
 
 class BaseStrategy(ABC):
     def __init__(self, name: str, symbols: List[str]):

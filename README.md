@@ -1,14 +1,14 @@
 # Antigravity Trading Bot 🚀
 
-A high-performance asynchronous algorithmic trading engine built for Bybit V5 API.
+A high-performance asynchronous algorithmic trading engine built for Bybit V5 API with advanced Risk Management and AI filtering.
 
 ## Features
-- **Event-Driven Architecture**: Low latency signal processing.
-- **Multi-Strategy Support**: Run MACD, RSI, and ML models concurrently.
-- **Risk Management**: Real-time position sizing and drawdown protection.
-- **Live Dashboard**: Streamlit-based monitoring UI with Diagnostics.
-- **Diagnostics**: Real-time logs, manual order testing, and strategy verification.
-- **Multi-Asset**: Supports trading multiple pairs (BTC, ETH, SOL, XRP, ADA, DOGE) simultaneously.
+- **Unbreakable Risk Management**: 4-level protection (Normal, Recovery, Emergency Stop), strict 3x leverage, and dynamic position sizing.
+- **AI-Powered Filtering**: LightGBM agent with 50+ technical indicators to filter high-probability signals.
+- **Adaptive Market Regimes**: 4-state classifier (Trending Up/Down, Ranging, High Volatile) to select the best strategy for current conditions.
+- **On-chain Analysis**: Integrated filters for exchange netflow, MVRV, and whale activity.
+- **Automated Optimization**: Separate Optimizer service for 24h parameter tuning and weekly AI retraining.
+- **Spot Recovery**: Automatic defensive mechanism using Spot DCA strategies when drawdown hits 20%.
 
 ---
 

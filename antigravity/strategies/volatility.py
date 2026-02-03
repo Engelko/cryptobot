@@ -4,7 +4,7 @@ from typing import Optional, List
 from antigravity.strategy import BaseStrategy, Signal, SignalType
 from antigravity.event import MarketDataEvent, KlineEvent
 from antigravity.strategies.config import VolatilityConfig
-from antigravity.market_regime import market_regime_detector, MarketRegime
+from antigravity.regime_detector import market_regime_detector, MarketRegime
 from antigravity.logging import get_logger
 
 logger = get_logger("strategy_volatility_breakout")

@@ -27,8 +27,14 @@ class Settings(BaseSettings):
     ENVIRONMENT: Literal["development", "production"] = "development"
 
     # Risk Management
-    MAX_DAILY_LOSS: float = Field(100.0, gt=0, description="Max daily loss in USDT")
-    MAX_POSITION_SIZE: float = Field(1000.0, gt=0, description="Max position size in USDT")
+    MAX_DAILY_LOSS: float = Field(20.0, gt=0, description="Max daily loss in USDT")
+    MAX_POSITION_SIZE: float = Field(50.0, gt=0, description="Max position size in USDT")
+    MAX_LEVERAGE: float = Field(3.0, gt=0, description="Max leverage")
+    STOP_LOSS_PCT: float = Field(0.02, description="Hard stop loss percentage")
+    TRAILING_STOP_TRIGGER: float = Field(0.015, description="Trailing stop activation profit percentage")
+    INITIAL_DEPOSIT: float = Field(186.0, description="Initial deposit for drawdown tracking")
+    RECOVERY_THRESHOLD: float = Field(0.70, description="Equity % to enter recovery mode")
+    EMERGENCY_THRESHOLD: float = Field(0.50, description="Equity % for emergency stop")
 
     # AI / LLM Configuration
     LLM_API_KEY: str = Field(default="", description="API Key for LLM Provider")

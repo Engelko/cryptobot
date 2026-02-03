@@ -17,6 +17,7 @@ from antigravity.strategies.scalping import ScalpingStrategy
 from antigravity.strategies.bb_squeeze import BBSqueezeStrategy
 from antigravity.strategies.grid_improved import GridMasterImproved as GridStrategy
 from antigravity.strategies.dynamic_risk_leverage import DynamicRiskLeverageStrategy
+from antigravity.strategies.spot_recovery import SpotRecoveryStrategy
 
 logger = get_logger("main")
 
@@ -87,6 +88,10 @@ async def main():
     if config.dynamic_risk_leverage and config.dynamic_risk_leverage.enabled:
         strategy_engine.register_strategy(DynamicRiskLeverageStrategy(config.dynamic_risk_leverage, symbols))
         logger.info("strategy_registered", name="DynamicRiskLeverage")
+
+    # Spot Recovery Strategy (always registered, but only active if in recovery mode logic)
+    strategy_engine.register_strategy(SpotRecoveryStrategy(symbols))
+    logger.info("strategy_registered", name="SpotRecovery")
     
     # Initialize Engine & Event Bus
     event_bus.start()

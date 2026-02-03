@@ -1,198 +1,204 @@
 import time
+import asyncio
 from datetime import datetime, timezone
+from enum import Enum
+from typing import Dict, Any
 from antigravity.config import settings
 from antigravity.strategy import Signal, SignalType
 from antigravity.logging import get_logger
 from antigravity.client import BybitClient
-from antigravity.execution import execution_manager
 from antigravity.database import db
-from antigravity.event import event_bus, TradeClosedEvent, on_event
+from antigravity.event import event_bus, TradeClosedEvent, OrderUpdateEvent, KlineEvent, on_event
 from antigravity.metrics import metrics
-from antigravity.fees import FeeConfig
+from antigravity.telegram_alerts import telegram_alerts
 
 logger = get_logger("risk_manager")
 
 # Minimum order cost in USDT (approximate)
 MIN_ORDER_COST = 10.0
 
+class TradingMode(Enum):
+    NORMAL = "NORMAL"
+    RECOVERY = "RECOVERY"  # Spot only, reduced size
+    EMERGENCY_STOP = "EMERGENCY_STOP"  # Full stop
+
 class RiskManager:
     def __init__(self):
+        self.initial_deposit = settings.INITIAL_DEPOSIT
         self.max_daily_loss = settings.MAX_DAILY_LOSS
-        self.max_position_size = settings.MAX_POSITION_SIZE
         self.current_daily_loss = 0.0
         self.last_reset_date = None
+        self.trading_mode = TradingMode.NORMAL
+        self.consecutive_loss_days = 0
 
-        # Cache fields
-        self._cached_balance = 0.0
-        self._balance_cache_time = 0
-        self._last_rejection_reason = None
+        # Local position tracking for cascade stops
+        self.active_positions: Dict[str, Dict[str, Any]] = {}
 
         # Load persisted state
         state = db.get_risk_state()
         if state:
-            # Handle SQLAlchemy object or dict
             if hasattr(state, "daily_loss"):
                 self.current_daily_loss = state.daily_loss
                 self.last_reset_date = state.last_reset_date
+                self.consecutive_loss_days = getattr(state, "consecutive_loss_days", 0)
             else:
-                self.current_daily_loss = state["daily_loss"]
-                self.last_reset_date = state["last_reset_date"]
+                self.current_daily_loss = state.get("daily_loss", 0.0)
+                self.last_reset_date = state.get("last_reset_date")
+                self.consecutive_loss_days = state.get("consecutive_loss_days", 0)
 
-        # Subscribe to trade closed events
+        # Subscribe to events
         event_bus.subscribe(TradeClosedEvent, self._handle_trade_closed)
+        event_bus.subscribe(OrderUpdateEvent, self._handle_order_update)
+        event_bus.subscribe(KlineEvent, self._handle_kline)
 
     def _get_current_utc_date(self) -> str:
-        """Returns current UTC date in YYYY-MM-DD format."""
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     def _check_reset(self):
-        """Resets daily loss if the date has changed (UTC)."""
         current_date = self._get_current_utc_date()
-
         if self.last_reset_date != current_date:
             logger.info("risk_daily_reset", old_date=self.last_reset_date, new_date=current_date, previous_loss=self.current_daily_loss)
+
+            # Check if previous day was a loss day (hit limit)
+            if self.current_daily_loss >= self.max_daily_loss:
+                self.consecutive_loss_days += 1
+            else:
+                self.consecutive_loss_days = 0
+
             self.current_daily_loss = 0.0
             self.last_reset_date = current_date
-            # Persist reset state
-            db.update_risk_state(self.current_daily_loss, self.last_reset_date)
+            db.update_risk_state(self.current_daily_loss, self.last_reset_date, self.consecutive_loss_days)
 
     async def _handle_trade_closed(self, event: TradeClosedEvent):
-        """Event handler for closed trades."""
-        self.update_metrics(event.pnl)
+        if event.pnl < 0:
+            self._check_reset()
+            self.current_daily_loss += abs(event.pnl)
+            db.update_risk_state(self.current_daily_loss, self.last_reset_date, self.consecutive_loss_days)
+            logger.info("risk_loss_updated", added_loss=abs(event.pnl), total_daily_loss=self.current_daily_loss)
 
-    async def check_signal(self, signal: Signal) -> bool:
-        """
-        Validate if the signal matches risk parameters.
-        Returns True if safe, False if blocked.
-        """
-        # 0. Check Reset
-        self._check_reset()
+    async def _handle_order_update(self, event: OrderUpdateEvent):
+        """Track positions for local monitoring."""
+        if event.order_status == "Filled":
+            symbol = event.symbol
+            side = event.side
+            qty = event.qty
+            price = event.price
 
-        # Check existing positions to allow "Reduce Only" trades
-        # If we are closing a position, we should usually allow it regardless of limits
-        is_reduce_only = False
-        try:
-            # We need to check actual exchange position to know if this reduces exposure.
-            # This is a bit heavy for RiskManager, but necessary for correctness.
-            # We assume RealBroker mode here mostly.
-            if not settings.SIMULATION_MODE:
-                client = BybitClient()
-                try:
-                    positions = await client.get_positions(category="linear", symbol=signal.symbol)
-                    for p in positions:
-                        size = float(p.get("size", 0))
-                        side = p.get("side")
-                        if size > 0:
-                            # If we have Long and signal is SELL -> Reduce
-                            if side == "Buy" and signal.type == SignalType.SELL:
-                                is_reduce_only = True
-                            # If we have Short and signal is BUY -> Reduce
-                            elif side == "Sell" and signal.type == SignalType.BUY:
-                                is_reduce_only = True
-                finally:
-                    await client.close()
-        except Exception as e:
-            logger.warning("risk_position_check_failed", error=str(e))
+            if symbol not in self.active_positions:
+                self.active_positions[symbol] = {
+                    "side": side,
+                    "entry_price": price,
+                    "qty": qty,
+                    "max_price_seen": price if side == "Buy" else -1.0,
+                    "min_price_seen": price if side == "Sell" else 999999.0,
+                    "trailing_active": False
+                }
+            else:
+                # Update existing (Average entry logic could be added)
+                pos = self.active_positions[symbol]
+                if side == pos["side"]:
+                    # Increase position
+                    new_qty = pos["qty"] + qty
+                    pos["entry_price"] = (pos["entry_price"] * pos["qty"] + price * qty) / new_qty
+                    pos["qty"] = new_qty
+                else:
+                    # Decrease or close
+                    if qty >= pos["qty"]:
+                        del self.active_positions[symbol]
+                    else:
+                        pos["qty"] -= qty
 
-        if is_reduce_only:
-            logger.info("risk_reduce_only_bypass", symbol=signal.symbol, type=signal.type)
-            return True
+    async def _handle_kline(self, event: KlineEvent):
+        """Local monitoring of SL/TS."""
+        symbol = event.symbol
+        if symbol not in self.active_positions:
+            return
 
-        # 1. Check Daily Loss Limit
-        if self.current_daily_loss >= self.max_daily_loss:
-            logger.warning("risk_block", reason="daily_loss_limit_exceeded", 
-                           current_loss=self.current_daily_loss, limit=self.max_daily_loss)
-            return False
+        pos = self.active_positions[symbol]
+        current_price = event.close
+        side = pos["side"]
 
-        # 2. Check Fees vs Edge (Basic)
-        # We don't have expected edge in signal yet, but we can ensure notional is high enough that fees don't eat it all.
-        # This is implicitly covered by MIN_ORDER_COST but let's be explicit if needed.
-        # For now, relying on MIN_ORDER_COST is enough for fees.
+        # Level 1: Hard Stop Loss (-2%)
+        if side == "Buy":
+            sl_price = pos["entry_price"] * (1 - settings.STOP_LOSS_PCT)
+            if current_price <= sl_price:
+                logger.warning("local_sl_triggered", symbol=symbol, price=current_price, sl=sl_price)
+                await self._emergency_close(symbol)
+                return
 
-        # 3. Check Position Size
-        # If quantity is provided, we check against MAX_POSITION_SIZE and Available Balance.
-        # If quantity is NOT provided, we check if we have minimum balance to execute ANY trade.
+            # Update max price for trailing stop
+            if current_price > pos["max_price_seen"]:
+                pos["max_price_seen"] = current_price
 
-        available_balance = await self._get_available_balance()
+            # Trailing Stop Trigger (+1.5% profit)
+            profit_pct = (current_price - pos["entry_price"]) / pos["entry_price"]
+            if profit_pct >= settings.TRAILING_STOP_TRIGGER:
+                pos["trailing_active"] = True
 
-        if signal.quantity and signal.price:
-            notional = signal.quantity * signal.price
+            if pos["trailing_active"]:
+                # Trailing SL: 1.5% from max seen price
+                ts_sl = pos["max_price_seen"] * (1 - settings.TRAILING_STOP_TRIGGER)
+                if current_price <= ts_sl:
+                    logger.warning("local_ts_triggered", symbol=symbol, price=current_price, ts_sl=ts_sl)
+                    await self._emergency_close(symbol)
 
-            # Check Max Position Size Config
-            if notional > self.max_position_size:
-                logger.warning("risk_block", reason="max_position_size_exceeded", 
-                               notional=notional, limit=self.max_position_size)
-                return False
+        elif side == "Sell":
+            sl_price = pos["entry_price"] * (1 + settings.STOP_LOSS_PCT)
+            if current_price >= sl_price:
+                logger.warning("local_sl_triggered", symbol=symbol, price=current_price, sl=sl_price)
+                await self._emergency_close(symbol)
+                return
 
-            # Check Account Balance (considering leverage)
-            # If leverage is provided, we check MARGIN required, not full notional.
-            leverage = signal.leverage if signal.leverage and signal.leverage > 0 else 1.0
+            if current_price < pos["min_price_seen"]:
+                pos["min_price_seen"] = current_price
 
-            # Fee Buffer: Reserve 1% for fees/slippage
-            balance_for_trading = available_balance * 0.99
+            profit_pct = (pos["entry_price"] - current_price) / pos["entry_price"]
+            if profit_pct >= settings.TRAILING_STOP_TRIGGER:
+                pos["trailing_active"] = True
 
-            margin_required = notional / leverage
+            if pos["trailing_active"]:
+                ts_sl = pos["min_price_seen"] * (1 + settings.TRAILING_STOP_TRIGGER)
+                if current_price >= ts_sl:
+                    logger.warning("local_ts_triggered", symbol=symbol, price=current_price, ts_sl=ts_sl)
+                    await self._emergency_close(symbol)
 
-            if margin_required > balance_for_trading:
-                 # Instead of rejecting, we resize the signal to match available balance
-                 # Max Notional = Balance * Leverage
-                 max_notional_allowed = balance_for_trading * leverage
+    async def _emergency_close(self, symbol: str):
+        """Force close position via Market order."""
+        logger.info("emergency_close_executing", symbol=symbol)
+        from antigravity.execution import execution_manager
+        pos = self.active_positions.get(symbol)
+        if not pos: return
 
-                 # Recalculate quantity
-                 new_quantity = max_notional_allowed / signal.price
+        side = "Sell" if pos["side"] == "Buy" else "Buy"
+        signal = Signal(
+            symbol=symbol,
+            type=SignalType.SELL if side == "Sell" else SignalType.BUY,
+            price=0.0, # Market
+            quantity=pos["qty"],
+            reason="LOCAL_CASCADE_STOP"
+        )
+        await execution_manager.execute(signal, "RiskManager_Emergency")
+        if symbol in self.active_positions:
+            del self.active_positions[symbol]
 
-                 # Check if the new quantity is still viable (above min cost)
-                 new_notional = new_quantity * signal.price
-                 if new_notional < MIN_ORDER_COST:
-                     logger.warning("risk_block", reason="insufficient_balance_for_min_order",
-                                    required_margin=margin_required, available=available_balance,
-                                    min_order_cost=MIN_ORDER_COST)
-                     return False
+    async def get_equity(self) -> float:
+        balance = await self._get_balance()
+        unrealized_pnl = 0.0
+        if not settings.SIMULATION_MODE:
+            client = BybitClient()
+            try:
+                positions = await client.get_positions(category="linear")
+                for p in positions:
+                    unrealized_pnl += float(p.get("unrealisedPnl", 0))
+            except Exception as e:
+                logger.error("equity_calc_error", error=str(e))
+            finally:
+                await client.close()
+        return balance + unrealized_pnl
 
-                 # Update signal in place
-                 logger.info("risk_resize",
-                             original_qty=signal.quantity,
-                             new_qty=new_quantity,
-                             reason="insufficient_balance_margin_limit",
-                             available_balance=balance_for_trading,
-                             leverage=leverage)
-
-                 signal.quantity = new_quantity
-                 # Signal is now safe to proceed
-
-        else:
-            # Quantity not provided. Strategy relies on Execution logic to size the trade.
-            # Execution logic uses min(balance, max_position_size).
-            # We must ensure we have at least enough balance for a minimum order (approx $10).
-            executable_size = min(available_balance, self.max_position_size)
-
-            if executable_size < MIN_ORDER_COST:
-                logger.warning("risk_block", reason="insufficient_balance_for_min_order",
-                               available=available_balance, max_pos=self.max_position_size,
-                               executable=executable_size, min_required=MIN_ORDER_COST)
-                return False
-
-        return True
-
-    def update_metrics(self, realized_pnl: float):
-        """
-        Update risk metrics after a trade closes.
-        """
-        # Ensure we are in the correct day bucket before adding loss
-        self._check_reset()
-
-        if realized_pnl < 0:
-            loss = abs(realized_pnl)
-            self.current_daily_loss += loss
-            logger.info("risk_loss_updated", added_loss=loss, total_daily_loss=self.current_daily_loss)
-
-            # Persist new loss state
-            db.update_risk_state(self.current_daily_loss, self.last_reset_date)
-
-    
-    async def _fetch_balance_from_api(self) -> float:
-        """Fetch fresh balance from API"""
+    async def _get_balance(self) -> float:
         if settings.SIMULATION_MODE:
+            from antigravity.execution import execution_manager
             return execution_manager.paper_broker.balance
         
         client = BybitClient()
@@ -204,44 +210,102 @@ class RiskManager:
                 for c in balance_data["coin"]:
                     if c.get("coin") == "USDT":
                         return float(c.get("walletBalance", 0.0))
+        except Exception:
+            pass
         finally:
             await client.close()
-        
         return 0.0
 
+    async def update_trading_mode(self):
+        equity = await self.get_equity()
+        equity_ratio = equity / self.initial_deposit if self.initial_deposit > 0 else 1.0
 
-    async def _get_available_balance(self) -> float:
-        """
-        Fetch available USDT balance.
-        If Simulation Mode, fetch from PaperBroker.
-        If Real Mode, fetch from Bybit API.
-        """
+        if equity_ratio < settings.EMERGENCY_THRESHOLD:
+            self.trading_mode = TradingMode.EMERGENCY_STOP
+        elif equity_ratio < 0.80 or self.consecutive_loss_days >= 2:
+            # Switch to Spot Recovery if <80% or 2 losing days
+            self.trading_mode = TradingMode.RECOVERY
+        elif self.trading_mode == TradingMode.RECOVERY and equity_ratio < 0.85:
+            # Stay in recovery mode until 85% reached
+            self.trading_mode = TradingMode.RECOVERY
+        else:
+            self.trading_mode = TradingMode.NORMAL
+
+        logger.info("trading_mode_check", equity=equity, ratio=f"{equity_ratio:.2%}", mode=self.trading_mode.value)
+
+    async def check_signal(self, signal: Signal) -> bool:
+        self._check_reset()
+        await self.update_trading_mode()
+
+        if self.trading_mode == TradingMode.EMERGENCY_STOP:
+            logger.critical("risk_block", reason="EMERGENCY_STOP", equity_ratio="<50%")
+            await telegram_alerts.send_message("🚨 <b>EMERGENCY STOP</b>\nEquity dropped below 50% threshold.")
+            # In emergency stop, we might want to close all positions too
+            await self._close_all_positions()
+            return False
+
+        if self.current_daily_loss >= settings.MAX_DAILY_LOSS:
+            logger.warning("risk_block", reason="daily_loss_limit_exceeded",
+                           current_loss=self.current_daily_loss, limit=settings.MAX_DAILY_LOSS)
+            await telegram_alerts.send_message(f"⚠️ <b>DAILY LOSS LIMIT REACHED</b>\nCurrent: -${self.current_daily_loss:.2f}")
+            # Close all positions on daily limit hit
+            await self._close_all_positions()
+            return False
+
+        if await self._is_reduce_only(signal):
+            return True
+
+        balance = await self._get_balance()
+        leverage = signal.leverage if signal.leverage and signal.leverage > 0 else 1.0
+        if leverage > settings.MAX_LEVERAGE:
+            leverage = settings.MAX_LEVERAGE
+            signal.leverage = leverage
+
+        daily_loss_left = max(0, settings.MAX_DAILY_LOSS - self.current_daily_loss)
+        size_by_pct = balance * 0.02
+        size_by_abs = settings.MAX_POSITION_SIZE
+        risk_size = (balance * daily_loss_left) / (settings.STOP_LOSS_PCT * leverage) if leverage > 0 else size_by_abs
+
+        target_size = min(size_by_pct, size_by_abs, risk_size)
+        if self.trading_mode == TradingMode.RECOVERY:
+            target_size = min(target_size, balance * 0.20)
+            signal.category = "spot"
+            signal.leverage = 1.0 # No leverage on spot recovery
+            logger.info("recovery_mode_active", target_size=target_size)
+
+        if signal.price and signal.price > 0:
+            target_qty = target_size / signal.price
+            if target_size < MIN_ORDER_COST:
+                return False
+            signal.quantity = target_qty
+
+        signal.stop_loss = signal.price * (1 - settings.STOP_LOSS_PCT) if signal.type == SignalType.BUY else signal.price * (1 + settings.STOP_LOSS_PCT)
+        return True
+
+    async def _close_all_positions(self):
+        symbols = list(self.active_positions.keys())
+        for s in symbols:
+            await self._emergency_close(s)
+
+    async def _is_reduce_only(self, signal: Signal) -> bool:
         if settings.SIMULATION_MODE:
-            return execution_manager.paper_broker.balance
+             from antigravity.execution import execution_manager
+             pos = execution_manager.paper_broker.positions.get(signal.symbol)
+             if pos and pos["quantity"] > 0:
+                 if signal.type == SignalType.SELL: return True
+             return False
 
-        # Real Mode
         client = BybitClient()
         try:
-            balance_data = await client.get_wallet_balance(coin="USDT")
-            # Logic MATCHING RealBroker._parse_available_balance to avoid 110007 mismatch
-
-            # 1. Unified Account
-            if "totalAvailableBalance" in balance_data and float(balance_data.get("totalAvailableBalance", 0)) > 0:
-                 return float(balance_data.get("totalAvailableBalance"))
-
-            if "totalWalletBalance" in balance_data:
-                 return float(balance_data.get("totalWalletBalance", 0.0))
-
-            # 2. Contract Account
-            elif "coin" in balance_data:
-                for c in balance_data["coin"]:
-                    if c.get("coin") == "USDT":
-                        if "availableToWithdraw" in c:
-                            return float(c.get("availableToWithdraw"))
-                        return float(c.get("walletBalance", 0.0))
-        except Exception as e:
-            logger.error("risk_balance_fetch_error", error=str(e))
+            positions = await client.get_positions(category="linear", symbol=signal.symbol)
+            for p in positions:
+                size = float(p.get("size", 0))
+                side = p.get("side")
+                if size > 0:
+                    if side == "Buy" and signal.type == SignalType.SELL: return True
+                    if side == "Sell" and signal.type == SignalType.BUY: return True
+        except Exception:
+            pass
         finally:
             await client.close()
-
-        return 0.0
+        return False

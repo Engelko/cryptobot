@@ -174,11 +174,43 @@ class RealBroker:
     """
     Executes orders on Bybit via API.
     """
+    async def _check_liquidity(self, symbol: str, category: str, qty: float) -> bool:
+        client = BybitClient()
+        try:
+            ob = await client.get_orderbook(symbol, category)
+            bids = ob.get("b", [])
+            asks = ob.get("a", [])
+
+            if not bids or not asks:
+                return False
+
+            best_bid = float(bids[0][0])
+            best_ask = float(asks[0][0])
+            spread = (best_ask - best_bid) / best_bid
+
+            if spread > 0.001: # 0.1%
+                logger.warning("liquidity_check_failed", symbol=symbol, reason="spread_too_high", spread=spread)
+                return False
+
+            # Depth check: Top 3 levels > 2x order size
+            depth_bids = sum(float(b[1]) for b in bids[:3])
+            depth_asks = sum(float(a[1]) for a in asks[:3])
+
+            if depth_bids < 2 * qty or depth_asks < 2 * qty:
+                logger.warning("liquidity_check_failed", symbol=symbol, reason="insufficient_depth",
+                               depth_bids=depth_bids, depth_asks=depth_asks, required=2*qty)
+                return False
+
+            return True
+        except Exception as e:
+            logger.error("liquidity_check_error", error=str(e))
+            return False
+        finally:
+            await client.close()
+
     async def execute_order(self, signal: Signal, strategy_name: str):
         client = BybitClient()
-        # Default to linear (Futures), but could support Spot if needed
-        # We assume linear for now as per main instruction, but will verify category support
-        category = getattr(settings, "DEFAULT_MARKET_TYPE", "linear")
+        category = signal.category
 
         try:
             # Generate Trace ID for logs if not present
@@ -219,7 +251,7 @@ class RealBroker:
                 # Use leverage from signal if available, otherwise default to 1x
                 leverage_multiplier = signal.leverage if signal.leverage is not None else 1.0
                 
-                # SET LEVERAGE ON EXCHANGE before placing order
+                # SET LEVERAGE ON EXCHANGE (Linear only)
                 if category == "linear" and signal.leverage and signal.leverage > 0:
                     leverage_set_success = await self._set_leverage(signal.symbol, signal.leverage)
                     if not leverage_set_success:
@@ -294,25 +326,47 @@ class RealBroker:
                      log.warning("real_buy_qty_zero", symbol=signal.symbol, qty=qty_str)
                      return
 
+                # Liquidity Check
+                if not await self._check_liquidity(signal.symbol, category, float(qty_str)):
+                    log.warning("real_buy_liquidity_fail_abort", symbol=signal.symbol)
+                    return
+
                 # Calculate Estimated Fees
                 estimated_fee = FeeConfig.estimate_fee(float(qty_str), price, "linear", is_maker=False)
                 log.info("fee_estimation", symbol=signal.symbol, side="Buy", fee=estimated_fee)
 
-                # Place Order
-                # Idempotency: Generate orderLinkId (max 45 chars)
-                # UUID is 36 chars. 36 + 4 ("-buy") = 40. Safe.
-                # But if trace_id is custom/longer, we truncate.
+                # Place Order with Cascade Stops
                 safe_trace_id = trace_id.replace("-", "")[:30]
                 order_link_id = f"{safe_trace_id}-buy"
 
-                res = await client.place_order(
-                    category=category,
-                    symbol=signal.symbol,
-                    side="Buy",
-                    orderType="Market",
-                    qty=qty_str,
-                    orderLinkId=order_link_id
-                )
+                if category == "spot":
+                    # Spot Market Buy: qty is USDT
+                    # We use trade_size directly
+                    spot_qty_str = str(round(trade_size, 2))
+                    res = await client.place_order(
+                        category="spot",
+                        symbol=signal.symbol,
+                        side="Buy",
+                        orderType="Market",
+                        qty=spot_qty_str,
+                        orderLinkId=order_link_id
+                    )
+                else:
+                    # Level 1: Hard SL and Trailing Stop
+                    sl_price = self._format_price(signal.symbol, signal.stop_loss) if hasattr(signal, "stop_loss") and signal.stop_loss else None
+                    # Trailing stop trigger at +1.5%
+                    ts_dist = self._format_price(signal.symbol, price * settings.TRAILING_STOP_TRIGGER)
+
+                    res = await client.place_order(
+                        category=category,
+                        symbol=signal.symbol,
+                        side="Buy",
+                        orderType="Market",
+                        qty=qty_str,
+                        orderLinkId=order_link_id,
+                        stopLoss=sl_price,
+                        trailingStop=ts_dist
+                    )
 
                 if res and "orderId" in res:
                     log.info("real_buy_filled", order_id=res["orderId"], qty=qty_str, order_link_id=order_link_id)
@@ -330,6 +384,35 @@ class RealBroker:
             # SELL SIGNAL
             # ---------------------------------------------------------
             elif signal.type == SignalType.SELL:
+                if category == "spot":
+                    # Spot Market Sell: qty is base coin
+                    # We need to find how much we have.
+                    # For simplicity, we use signal.quantity or fetch balance.
+                    balance_data = await client.get_wallet_balance(coin=signal.symbol.replace("USDT", ""))
+                    # Extract coin balance
+                    coin_qty = 0.0
+                    if "coin" in balance_data:
+                        for c in balance_data["coin"]:
+                             if c["coin"] in signal.symbol:
+                                 coin_qty = float(c.get("walletBalance", 0))
+
+                    if coin_qty <= 0:
+                        log.warning("spot_sell_no_balance", symbol=signal.symbol)
+                        return
+
+                    qty_str = self._format_qty(signal.symbol, coin_qty)
+                    res = await client.place_order(
+                        category="spot",
+                        symbol=signal.symbol,
+                        side="Sell",
+                        orderType="Market",
+                        qty=qty_str,
+                        orderLinkId=f"{trace_id[:30]}-spot-sell"
+                    )
+                    if res and "orderId" in res:
+                        log.info("spot_sell_filled", order_id=res["orderId"])
+                    return
+
                 if long_pos:
                     # CLOSE LONG
                     qty_to_close = long_pos["size"] # Already formatted by API?
@@ -445,23 +528,34 @@ class RealBroker:
                          log.warning("real_sell_qty_zero", symbol=signal.symbol, qty=qty_str)
                          return
 
+                    # Liquidity Check
+                    if not await self._check_liquidity(signal.symbol, category, float(qty_str)):
+                        log.warning("real_sell_liquidity_fail_abort", symbol=signal.symbol)
+                        return
+
                     log.info("real_sell_opening_short", symbol=signal.symbol, qty=qty_str)
 
                     # Calculate Estimated Fees
                     estimated_fee = FeeConfig.estimate_fee(float(qty_str), price, "linear", is_maker=False)
                     log.info("fee_estimation", symbol=signal.symbol, side="Sell", fee=estimated_fee)
 
-                    # Idempotency
+                    # Place Order with Cascade Stops
                     safe_trace_id = trace_id.replace("-", "")[:30]
                     order_link_id = f"{safe_trace_id}-open-short"
 
+                    # Level 1: Hard SL and Trailing Stop
+                    sl_price = self._format_price(signal.symbol, signal.stop_loss) if hasattr(signal, "stop_loss") and signal.stop_loss else None
+                    ts_dist = self._format_price(signal.symbol, price * settings.TRAILING_STOP_TRIGGER)
+
                     res = await client.place_order(
                         category=category,
-                        symbol=signal.symbol,
+                        symbol=symbol if (symbol := signal.symbol) else "",
                         side="Sell",
                         orderType="Market",
                         qty=qty_str,
-                        orderLinkId=order_link_id
+                        orderLinkId=order_link_id,
+                        stopLoss=sl_price,
+                        trailingStop=ts_dist
                     )
 
                     if res and "orderId" in res:
@@ -567,6 +661,12 @@ class RealBroker:
             logger.error("qty_format_error", symbol=symbol, error=str(e))
             # Fallback to simple string format
             return f"{qty:.{precision}f}"
+
+    def _format_price(self, symbol: str, price: float) -> str:
+        """Formats price to appropriate precision."""
+        # Simple heuristic: BTC uses 2, ETH uses 2, others might use more.
+        # Use 2 as default for linear USDT pairs.
+        return f"{price:.2f}"
 
     def _parse_available_balance(self, data: Dict) -> float:
         """

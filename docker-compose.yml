@@ -31,6 +31,21 @@ services:
     networks:
       - antigravity-net
 
+  optimizer:
+    build: .
+    container_name: antigravity-optimizer
+    command: python optimizer.py
+    volumes:
+      - ./storage:/app/storage
+      - ./.env:/app/.env
+      - ./strategies.yaml:/app/strategies.yaml
+    environment:
+      - TZ=Europe/Moscow
+      - DATABASE_URL=sqlite:///storage/data.db
+    restart: unless-stopped
+    networks:
+      - antigravity-net
+
 networks:
   antigravity-net:
     driver: bridge
