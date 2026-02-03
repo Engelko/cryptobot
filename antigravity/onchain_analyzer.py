@@ -28,7 +28,7 @@ class OnchainAnalyzer:
         self.messari_api_key = getattr(settings, "MESSARI_API_KEY", "")
 
         # Cache management
-        self._score_cache = {"value": 0.5, "timestamp": 0}
+        self._score_cache = {"value": 0.5, "timestamp": 0, "netflow": 0.0, "fear_greed": 50}
         self._whale_cache = {"safe": True, "timestamp": 0}
         self.last_whale_activity = 0
 
@@ -72,7 +72,12 @@ class OnchainAnalyzer:
                 # 3. Compute sentiment score
                 score = self._compute_sentiment_score(netflow, fear_greed)
 
-                self._score_cache = {"value": score, "timestamp": time.time()}
+                self._score_cache = {
+                    "value": score,
+                    "timestamp": time.time(),
+                    "netflow": netflow,
+                    "fear_greed": fear_greed
+                }
                 self.backoff_multiplier = max(1.0, self.backoff_multiplier * 0.9) # Gradual recovery
                 logger.info("onchain_score_updated", score=score, netflow=netflow, fear_greed=fear_greed)
 
@@ -144,6 +149,14 @@ class OnchainAnalyzer:
     def get_score(self) -> float:
         """Returns bullish/bearish score (0.0 - 1.0)."""
         return self._score_cache['value']
+
+    def get_netflow(self) -> float:
+        """Returns last fetched netflow value."""
+        return self._score_cache.get('netflow', 0.0)
+
+    def get_fear_greed(self) -> int:
+        """Returns last fetched Fear & Greed index."""
+        return self._score_cache.get('fear_greed', 50)
 
     def is_whale_safe(self) -> bool:
         """Returns False if recent whale activity detected (last 30 mins)."""
