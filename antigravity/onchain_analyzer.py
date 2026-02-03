@@ -11,8 +11,8 @@ logger = get_logger("onchain_analyzer")
 class OnchainAnalyzer:
     def __init__(self):
         # These should be added to .env by the user
-        self.glassnode_api_key = os.getenv("GLASSNODE_API_KEY", "")
-        self.whale_alert_api_key = os.getenv("WHALE_ALERT_API_KEY", "")
+        self.glassnode_api_key = getattr(settings, "GLASSNODE_API_KEY", "")
+        self.whale_alert_api_key = getattr(settings, "WHALE_ALERT_API_KEY", "")
 
         self.last_whale_activity = 0
         self.whale_tx_count = 0
