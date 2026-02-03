@@ -88,6 +88,15 @@ class DBMarketRegime(Base):
     volatility = Column(Float)
     updated_at = Column(DateTime, default=datetime.now)
 
+class DBMarketRegimeHistory(Base):
+    __tablename__ = 'market_regime_history'
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String)
+    regime = Column(String)
+    adx = Column(Float)
+    volatility = Column(Float)
+    created_at = Column(DateTime, default=datetime.now)
+
 class Database:
     def __init__(self, db_path=None):
         if db_path is None:
@@ -249,7 +258,7 @@ class Database:
     def save_market_regime(self, symbol, regime, adx, volatility):
         session = self.Session()
         try:
-            # Upsert
+            # 1. Upsert Current State
             record = session.query(DBMarketRegime).filter_by(symbol=symbol).first()
             if not record:
                 record = DBMarketRegime(symbol=symbol, regime=regime, adx=adx, volatility=volatility)
@@ -259,6 +268,11 @@ class Database:
                 record.adx = adx
                 record.volatility = volatility
                 record.updated_at = datetime.now()
+
+            # 2. Add to History
+            history = DBMarketRegimeHistory(symbol=symbol, regime=regime, adx=adx, volatility=volatility)
+            session.add(history)
+
             session.commit()
         except Exception as e:
             logger.error("db_save_regime_failed", error=str(e), symbol=symbol)
