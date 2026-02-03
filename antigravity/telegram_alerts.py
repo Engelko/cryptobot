@@ -1,14 +1,14 @@
 import aiohttp
 import asyncio
-import os
 from antigravity.logging import get_logger
+from antigravity.config import settings
 
 logger = get_logger("telegram_alerts")
 
 class TelegramAlerts:
     def __init__(self):
-        self.token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        self.chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+        self.token = settings.TELEGRAM_BOT_TOKEN
+        self.chat_id = settings.TELEGRAM_CHAT_ID
         self.enabled = bool(self.token and self.chat_id)
 
     async def send_message(self, text: str):

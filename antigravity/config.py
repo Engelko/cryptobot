@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = Field("sqlite:///storage/data.db", description="Database URL")
 
+    # Telegram Notifications
+    TELEGRAM_BOT_TOKEN: str = Field(default="", description="Telegram Bot Token")
+    TELEGRAM_CHAT_ID: str = Field(default="", description="Telegram Chat ID")
+
+    # On-chain Analysis
+    GLASSNODE_API_KEY: str = Field(default="", description="Glassnode API Key")
+    WHALE_ALERT_API_KEY: str = Field(default="", description="Whale Alert API Key")
+
     def model_post_init(self, __context):
         # Handle string input for list if coming from .env as a string
         if isinstance(self.TRADING_SYMBOLS, str):
