@@ -3,6 +3,7 @@ from antigravity.strategy import BaseStrategy, Signal, SignalType, TakeProfitLev
 from antigravity.event import MarketDataEvent, KlineEvent
 from antigravity.logging import get_logger
 from antigravity.config import settings
+from antigravity.regime_detector import MarketRegime, market_regime_detector
 
 logger = get_logger("spot_recovery_strategy")
 
@@ -16,7 +17,6 @@ class SpotRecoveryStrategy(BaseStrategy):
     """
     def __init__(self, symbols: List[str]):
         super().__init__("SpotRecovery", symbols)
-        self.active_dca: Dict[str, Dict] = {} # symbol -> {avg_price, total_qty, stage}
 
     async def on_market_data(self, event: MarketDataEvent) -> Optional[Signal]:
         if not isinstance(event, KlineEvent):
@@ -25,14 +25,35 @@ class SpotRecoveryStrategy(BaseStrategy):
         symbol = event.symbol
         price = event.close
 
-        # Check if we have an active DCA for this symbol
-        if symbol not in self.active_dca:
-            # We only start DCA if triggered externally or by some logic.
-            # For now, let's say we start it if price is 'stable' and we are in recovery mode.
-            # But the StrategyEngine will call this.
+        # Access active_dca from persisted state
+        dca = self.state.get(symbol, {})
+
+        # 1. Trigger Logic for First Buy
+        if not dca or not dca.get("active"):
+            from antigravity.engine import strategy_engine
+            from antigravity.risk import TradingMode
+
+            risk_manager = strategy_engine.risk_manager
+            regime_data = market_regime_detector.regimes.get(symbol)
+
+            # Trigger if in RECOVERY mode and market is VOLATILE
+            if risk_manager.trading_mode == TradingMode.RECOVERY and \
+               regime_data and regime_data.regime == MarketRegime.VOLATILE:
+
+                logger.info("spot_recovery_trigger", symbol=symbol, price=price)
+
+                # Initialize DCA state
+                await self.start_dca(symbol, initial_qty=0.0, price=price) # quantity will be set by RiskManager
+
+                return Signal(
+                    symbol=symbol,
+                    type=SignalType.BUY,
+                    price=price,
+                    reason="SPOT_RECOVERY_START",
+                    category="spot"
+                )
             return None
 
-        dca = self.active_dca[symbol]
         avg_price = dca['avg_price']
         stage = dca['stage']
 
@@ -40,11 +61,11 @@ class SpotRecoveryStrategy(BaseStrategy):
         if stage == 1 and price <= avg_price * 0.97: # -3%
             dca['stage'] = 2
             logger.info("spot_dca_stage_2", symbol=symbol, price=price)
+            await self.save_state()
             return Signal(
                 symbol=symbol,
                 type=SignalType.BUY,
                 price=price,
-                quantity=dca['initial_qty'] * 0.3 / 0.3, # This logic needs fixing
                 reason="SPOT_DCA_STAGE_2",
                 category="spot"
             )
@@ -52,6 +73,7 @@ class SpotRecoveryStrategy(BaseStrategy):
         if stage == 2 and price <= avg_price * 0.94: # -6%
             dca['stage'] = 3
             logger.info("spot_dca_stage_3", symbol=symbol, price=price)
+            await self.save_state()
             return Signal(
                 symbol=symbol,
                 type=SignalType.BUY,
@@ -63,7 +85,8 @@ class SpotRecoveryStrategy(BaseStrategy):
         # Check for Take Profit (+5%)
         if price >= avg_price * 1.05:
             logger.info("spot_dca_tp_hit", symbol=symbol, price=price, avg=avg_price)
-            del self.active_dca[symbol]
+            self.state[symbol] = {"active": False}
+            await self.save_state()
             return Signal(
                 symbol=symbol,
                 type=SignalType.SELL,
@@ -74,10 +97,37 @@ class SpotRecoveryStrategy(BaseStrategy):
 
         return None
 
-    def start_dca(self, symbol: str, initial_qty: float, price: float):
-        self.active_dca[symbol] = {
+    async def on_order_update(self, event):
+        """Update state when Spot DCA orders are filled."""
+        if event.order_status != "Filled":
+            return
+
+        symbol = event.symbol
+        dca = self.state.get(symbol, {})
+        if not dca or not dca.get("active"):
+            return
+
+        # Update Average Price and Total Quantity
+        price = event.price
+        qty = event.qty
+
+        current_total_qty = dca.get("total_qty", 0.0)
+        current_avg_price = dca.get("avg_price", 0.0)
+
+        new_total_qty = current_total_qty + qty
+        if new_total_qty > 0:
+            new_avg_price = (current_avg_price * current_total_qty + price * qty) / new_total_qty
+            dca["avg_price"] = new_avg_price
+            dca["total_qty"] = new_total_qty
+
+            logger.info("spot_recovery_state_updated", symbol=symbol, avg_price=new_avg_price, total_qty=new_total_qty)
+            await self.save_state()
+
+    async def start_dca(self, symbol: str, initial_qty: float, price: float):
+        self.state[symbol] = {
+            "active": True,
             "avg_price": price,
             "total_qty": initial_qty,
-            "initial_qty_budget": initial_qty / 0.3, # If first buy is 30%
             "stage": 1
         }
+        await self.save_state()

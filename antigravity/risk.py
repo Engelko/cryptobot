@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Dict, Any
 from antigravity.config import settings
 from antigravity.strategy import Signal, SignalType
+from antigravity.regime_detector import MarketRegime, market_regime_detector
 from antigravity.logging import get_logger
 from antigravity.client import BybitClient
 from antigravity.database import db
@@ -278,11 +279,18 @@ class RiskManager:
         risk_size = (balance * daily_loss_left) / (settings.STOP_LOSS_PCT * leverage) if leverage > 0 else size_by_abs
 
         target_size = min(size_by_pct, size_by_abs, risk_size)
-        if self.trading_mode == TradingMode.RECOVERY:
+
+        # Check for High Volatility
+        regime_data = market_regime_detector.regimes.get(signal.symbol)
+        is_volatile = regime_data and regime_data.regime == MarketRegime.VOLATILE
+
+        if self.trading_mode == TradingMode.RECOVERY or is_volatile:
+            # Force Spot and reduce size in recovery or high volatility
             target_size = min(target_size, balance * 0.20)
             signal.category = "spot"
-            signal.leverage = 1.0 # No leverage on spot recovery
-            logger.info("recovery_mode_active", target_size=target_size)
+            signal.leverage = 1.0 # No leverage on spot
+            reason = "VOLATILE_REGIME" if is_volatile else "RECOVERY_MODE"
+            logger.info("spot_only_mode_active", reason=reason, symbol=signal.symbol, target_size=target_size)
 
         if signal.price and signal.price > 0:
             target_qty = target_size / signal.price
