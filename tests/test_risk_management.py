@@ -9,6 +9,9 @@ class TestNewRisk(unittest.TestCase):
     def setUp(self):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
+        # Clear global regime state to prevent test interference
+        from antigravity.regime_detector import market_regime_detector
+        market_regime_detector.regimes.clear()
 
     def tearDown(self):
         self.loop.close()
