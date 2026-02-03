@@ -28,10 +28,8 @@ class StrategyRouter:
 
         # 0. High Volatility Check
         if regime == MarketRegime.VOLATILE:
-            # Block Futures (linear) in high volatility
-            if signal.category == "linear":
-                logger.warning("router_block", strategy=strategy_name, regime="VOLATILE", reason="Futures prohibited in High Volatility")
-                return False
+            # We no longer block futures here. RiskManager will convert them to Spot if necessary.
+            logger.debug("router_volatile_pass", strategy=strategy_name, regime="VOLATILE", reason="Volatility detected, passing to RiskManager for possible conversion to Spot")
         symbol = signal.symbol
 
         # Logic Matrix
@@ -42,10 +40,10 @@ class StrategyRouter:
                 logger.debug("router_block", strategy=strategy_name, regime=regime.value, reason="Grid only in Range")
                 return False
 
-        # 2. Trend Strategies -> Only TRENDING (UP/DOWN)
+        # 2. Trend Strategies -> Only TRENDING (UP/DOWN) or VOLATILE (as Spot)
         if "Trend" in strategy_name or "GoldenCross" in strategy_name:
-             if regime not in [MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN]:
-                 logger.debug("router_block", strategy=strategy_name, regime=regime.value, reason="Trend only in Trend")
+             if regime not in [MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN, MarketRegime.VOLATILE]:
+                 logger.debug("router_block", strategy=strategy_name, regime=regime.value, reason="Trend only in Trend or Volatile")
                  return False
 
              # Counter-trend check
