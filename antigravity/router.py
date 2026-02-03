@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional
 from antigravity.strategy import Signal, SignalType
-from antigravity.market_regime import MarketRegime, MarketRegimeData
+from antigravity.regime_detector import MarketRegime, MarketRegimeData
 from antigravity.logging import get_logger
 
 logger = get_logger("strategy_router")
@@ -25,6 +25,13 @@ class StrategyRouter:
             return True
 
         regime = regime_data.regime
+
+        # 0. High Volatility Check
+        if regime == MarketRegime.VOLATILE:
+            # Block Futures (linear) in high volatility
+            if signal.category == "linear":
+                logger.warning("router_block", strategy=strategy_name, regime="VOLATILE", reason="Futures prohibited in High Volatility")
+                return False
         symbol = signal.symbol
 
         # Logic Matrix

@@ -159,6 +159,10 @@ class TestLeverageFix(unittest.TestCase):
         mock_instance.get_wallet_balance = AsyncMock(return_value={"totalWalletBalance": "1000"})
         mock_instance.get_positions = AsyncMock(return_value=[])
         mock_instance.set_leverage = AsyncMock(return_value=True)
+        mock_instance.get_orderbook = AsyncMock(return_value={
+            "b": [["2999", "10"], ["2998", "10"], ["2997", "10"]],
+            "a": [["3001", "10"], ["3002", "10"], ["3003", "10"]]
+        })
         mock_instance.place_order = AsyncMock(return_value={"orderId": "12345"})
         mock_instance.close = AsyncMock()
 

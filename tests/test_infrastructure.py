@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import MagicMock
-from antigravity.market_regime import MarketRegimeDetector, MarketRegime, MarketRegimeData
+from antigravity.regime_detector import MarketRegimeDetector, MarketRegime, MarketRegimeData
 from antigravity.router import StrategyRouter
 from antigravity.strategy import Signal, SignalType
 

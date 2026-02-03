@@ -10,3 +10,5 @@ sqlalchemy
 PyYAML
 tenacity
 typing_extensions
+lightgbm
+joblib

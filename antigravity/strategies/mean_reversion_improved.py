@@ -4,7 +4,7 @@ from typing import Optional, List, Dict
 from antigravity.strategy import BaseStrategy, Signal, SignalType
 from antigravity.event import MarketDataEvent, KlineEvent
 from antigravity.strategies.config import MeanReversionConfig
-from antigravity.market_regime import market_regime_detector, MarketRegime
+from antigravity.regime_detector import market_regime_detector, MarketRegime
 from antigravity.logging import get_logger
 
 logger = get_logger("strategy_mean_rev_improved")

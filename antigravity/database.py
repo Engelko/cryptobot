@@ -67,6 +67,7 @@ class DBRiskState(Base):
     __tablename__ = 'risk_state'
     id = Column(Integer, primary_key=True)
     daily_loss = Column(Float, default=0.0)
+    consecutive_loss_days = Column(Integer, default=0)
     last_reset_date = Column(String) # YYYY-MM-DD
     updated_at = Column(DateTime, default=datetime.now)
 
@@ -112,6 +113,20 @@ class Database:
         finally:
             session.close()
 
+    def get_recent_trades(self, strategy: str = None, limit: int = 20):
+        session = self.Session()
+        try:
+            query = session.query(DBTrade)
+            if strategy:
+                query = query.filter_by(strategy=strategy)
+            trades = query.order_by(DBTrade.created_at.desc()).limit(limit).all()
+            return [{"pnl": t.pnl, "created_at": t.created_at} for t in trades]
+        except Exception as e:
+            logger.error("db_get_trades_failed", error=str(e))
+            return []
+        finally:
+            session.close()
+
     def get_strategy_state(self, strategy: str, symbol: str) -> dict:
         session = self.Session()
         try:
@@ -149,7 +164,11 @@ class Database:
             # Singleton state, id=1
             state = session.query(DBRiskState).filter_by(id=1).first()
             if state:
-                return {"daily_loss": state.daily_loss, "last_reset_date": state.last_reset_date}
+                return {
+                    "daily_loss": state.daily_loss,
+                    "last_reset_date": state.last_reset_date,
+                    "consecutive_loss_days": state.consecutive_loss_days
+                }
             return None
         except Exception as e:
             logger.error("db_get_risk_state_failed", error=str(e))
@@ -157,16 +176,17 @@ class Database:
         finally:
             session.close()
 
-    def update_risk_state(self, daily_loss, last_reset_date):
+    def update_risk_state(self, daily_loss, last_reset_date, consecutive_loss_days=0):
         session = self.Session()
         try:
             state = session.query(DBRiskState).filter_by(id=1).first()
             if not state:
-                state = DBRiskState(id=1, daily_loss=daily_loss, last_reset_date=last_reset_date, updated_at=datetime.now())
+                state = DBRiskState(id=1, daily_loss=daily_loss, last_reset_date=last_reset_date, consecutive_loss_days=consecutive_loss_days, updated_at=datetime.now())
                 session.add(state)
             else:
                 state.daily_loss = daily_loss
                 state.last_reset_date = last_reset_date
+                state.consecutive_loss_days = consecutive_loss_days
                 state.updated_at = datetime.now()
             session.commit()
         except Exception as e:

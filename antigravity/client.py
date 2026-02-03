@@ -101,7 +101,19 @@ class BybitClient:
         res = await self._request("GET", endpoint, params)
         return res.get("list", [])
 
-    async def place_order(self, category: str, symbol: str, side: str, orderType: str, qty: str, price: str = None, timeInForce: str = "GTC", orderLinkId: str = None) -> Dict:
+    async def get_orderbook(self, symbol: str, category: str = "linear", limit: int = 25) -> Dict:
+        """
+        Get orderbook data.
+        """
+        endpoint = "/v5/market/orderbook"
+        params = {
+            "category": category,
+            "symbol": symbol,
+            "limit": limit
+        }
+        return await self._request("GET", endpoint, params)
+
+    async def place_order(self, category: str, symbol: str, side: str, orderType: str, qty: str, price: str = None, timeInForce: str = "GTC", orderLinkId: str = None, stopLoss: str = None, takeProfit: str = None, trailingStop: str = None) -> Dict:
         """
         Place a new order.
         """
@@ -118,6 +130,12 @@ class BybitClient:
             payload["price"] = price
         if orderLinkId:
             payload["orderLinkId"] = orderLinkId
+        if stopLoss:
+            payload["stopLoss"] = stopLoss
+        if takeProfit:
+            payload["takeProfit"] = takeProfit
+        if trailingStop:
+            payload["trailingStop"] = trailingStop
 
         res = await self._request("POST", endpoint, payload)
         return res

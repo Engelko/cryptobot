@@ -8,8 +8,10 @@ from antigravity.database import db
 from antigravity.execution import execution_manager
 from antigravity.ml_engine import ml_engine
 from antigravity.client import BybitClient
-from antigravity.market_regime import market_regime_detector
+from antigravity.regime_detector import market_regime_detector
 from antigravity.router import strategy_router
+from antigravity.onchain_analyzer import onchain_analyzer
+from antigravity.performance_guard import performance_guard
 import pandas as pd
 
 logger = get_logger("strategy_engine")
@@ -20,6 +22,7 @@ class StrategyEngine:
         self._running = False
         self.risk_manager = RiskManager()
         self.ml_engine = ml_engine
+        self.latest_predictions: Dict[str, Dict] = {}
 
     def register_strategy(self, strategy: AbstractStrategy):
         self.strategies[strategy.name] = strategy
@@ -110,9 +113,22 @@ class StrategyEngine:
 
         logger.info("warmup_complete")
 
+    async def _onchain_update_loop(self):
+        """Background loop to update on-chain metrics."""
+        while self._running:
+            try:
+                await onchain_analyzer.fetch_onchain_data()
+                await onchain_analyzer.check_whale_activity()
+            except Exception as e:
+                logger.error("onchain_loop_error", error=str(e))
+            await asyncio.sleep(3600) # Update hourly
+
     async def start(self):
         self._running = True
         logger.info("strategy_engine_started")
+
+        # Start on-chain loop
+        asyncio.create_task(self._onchain_update_loop())
 
         # Start all strategies
         for name, strategy in self.strategies.items():
@@ -133,6 +149,10 @@ class StrategyEngine:
         event_bus.subscribe(KlineEvent, self._handle_market_data)
         event_bus.subscribe(OrderUpdateEvent, self._handle_order_update)
         event_bus.subscribe(SentimentEvent, self._handle_sentiment)
+        event_bus.subscribe(TradeClosedEvent, self._handle_trade_closed)
+
+    async def _handle_trade_closed(self, event: TradeClosedEvent):
+        await performance_guard.check_performance(event.strategy)
 
     async def stop(self):
         self._running = False
@@ -151,57 +171,36 @@ class StrategyEngine:
         if not self._running:
             return
 
-        # Persist Klines
+        # Persist Klines, Update Market Regime & AI Prediction
         if isinstance(event, KlineEvent):
             db.save_kline(event.symbol, event.interval, event.open, event.high, event.low, event.close, event.volume, event.timestamp)
-            
-            # ML Prediction Hook
-            try:
-                if getattr(self.ml_engine, "enabled", False):
-                    features = {
-                        "close": event.close,
-                        "volume": event.volume,
-                        "high": event.high,
-                        "low": event.low,
-                        "open": event.open
-                    }
-                    prediction = await self.ml_engine.predict_price_movement(event.symbol, features)
 
-                    if prediction:
-                        event.prediction = prediction
-                        db.save_prediction(
-                            symbol=event.symbol,
-                            prediction_value=prediction.get("predicted_change", 0.0),
-                            confidence=prediction.get("confidence", 0.0),
-                            features=features
-                        )
-            except Exception as e:
-                logger.error("ml_hook_failed", symbol=event.symbol, error=str(e))
-
-        # Update Market Regime Detector
-        if isinstance(event, KlineEvent):
-            # We can't update regime on every tick efficiently if we need full kline history.
-            # But here we have the latest kline event.
-            # Ideally we keep a buffer of recent klines in the detector or fetch from DB/Memory.
-            # For simplicity, we assume detector manages its own state or we pass minimal info.
-            # The detector currently needs a list of klines.
-            # Fetching from DB every tick is slow.
-            # We will skip real-time regime update here and rely on a separate loop or cached data.
-            # OR, we can just load the last 50 klines from DB quickly (SQLite is fast).
             try:
-                 # Quick DB fetch for regime context
-                 # This might be heavy for high frequency. But for 1m candles it's fine.
                  from sqlalchemy import text
-                 query = text("SELECT * FROM klines WHERE symbol=:symbol ORDER BY ts DESC LIMIT 60")
+                 # Fetch 100 candles for both Regime Detection and AI Agent
+                 query = text("SELECT * FROM klines WHERE symbol=:symbol ORDER BY ts DESC LIMIT 100")
                  recent_klines_df = pd.read_sql(query, db.engine, params={"symbol": event.symbol})
 
                  if not recent_klines_df.empty:
-                     # Reverse to chronological order
                      recent_klines = recent_klines_df.iloc[::-1].to_dict('records')
+
+                     # 1. Update Regime
                      market_regime_detector.analyze(event.symbol, recent_klines)
+
+                     # 2. AI Prediction (LightGBM)
+                     if self.ml_engine.enabled:
+                         prediction = await self.ml_engine.predict_price_movement(event.symbol, recent_klines)
+                         if prediction:
+                             event.prediction = prediction
+                             self.latest_predictions[event.symbol] = prediction
+                             db.save_prediction(
+                                 symbol=event.symbol,
+                                 prediction_value=1.0 if prediction.get("direction") == "UP" else 0.0,
+                                 confidence=prediction.get("confidence", 0.0),
+                                 features={"regime": market_regime_detector.regimes.get(event.symbol).regime.value if event.symbol in market_regime_detector.regimes else "None"}
+                             )
             except Exception as e:
-                # Don't block execution for regime failure
-                pass
+                logger.error("market_analysis_failed", symbol=event.symbol, error=str(e))
 
         # Forward to all strategies
         for name, strategy in self.strategies.items():
@@ -239,6 +238,10 @@ class StrategyEngine:
         """
         Process a signal generated by a strategy. 
         """
+        # -1. Performance Guard Check
+        if performance_guard.is_disabled(strategy_name):
+            return
+
         # 0. Strategy Router Check (Regime Filter)
         regime_data = market_regime_detector.regimes.get(signal.symbol)
         if not strategy_router.check_signal(signal, strategy_name, regime_data):
@@ -248,7 +251,39 @@ class StrategyEngine:
                            f"[REJECTED: Market Regime] {signal.reason}")
             return
 
-        # 1. Risk Check
+        # 1. AI Agent Filter
+        if self.ml_engine.enabled:
+            pred = self.latest_predictions.get(signal.symbol)
+            if pred:
+                direction = pred.get("direction")
+                confidence = pred.get("confidence", 0.0)
+
+                # Filter: Confidence > 0.6 and direction must match signal
+                if confidence < 0.6:
+                    logger.info("signal_rejected_by_ai", symbol=signal.symbol, reason="low_confidence", conf=confidence)
+                    db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price, f"[REJECTED: AI Low Conf] {confidence:.2f}")
+                    return
+
+                if (signal.type == SignalType.BUY and direction != "UP") or \
+                   (signal.type == SignalType.SELL and direction != "DOWN"):
+                    logger.info("signal_rejected_by_ai", symbol=signal.symbol, reason="direction_mismatch", pred=direction)
+                    db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price, f"[REJECTED: AI Direction] {direction}")
+                    return
+
+        # 2. On-chain Filter
+        if not onchain_analyzer.is_whale_safe():
+            logger.info("signal_rejected_by_onchain", symbol=signal.symbol, reason="whale_activity")
+            db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price, "[REJECTED: Whale Activity]")
+            return
+
+        onchain_score = onchain_analyzer.get_score()
+        if (signal.type == SignalType.BUY and onchain_score < 0.4) or \
+           (signal.type == SignalType.SELL and onchain_score > 0.6):
+            logger.info("signal_rejected_by_onchain", symbol=signal.symbol, reason="score_mismatch", score=onchain_score)
+            db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price, f"[REJECTED: On-chain Score {onchain_score:.2f}]")
+            return
+
+        # 3. Risk Check
         if not await self.risk_manager.check_signal(signal):
             logger.warning("signal_rejected_by_risk", strategy=strategy_name, symbol=signal.symbol, 
                          leverage=signal.leverage, risk_percentage=signal.risk_percentage)
