@@ -11,6 +11,7 @@ import json
 import logging
 import yaml
 import joblib
+import lightgbm
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional
 
