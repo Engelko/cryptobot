@@ -2,7 +2,7 @@ import asyncio
 from typing import Dict, List
 from antigravity.logging import get_logger
 from antigravity.event import event_bus, MarketDataEvent, KlineEvent, OrderUpdateEvent, on_event, SentimentEvent, TradeClosedEvent
-from antigravity.strategy import AbstractStrategy, Signal
+from antigravity.strategy import AbstractStrategy, Signal, SignalType
 from antigravity.risk import RiskManager
 from antigravity.database import db
 from antigravity.execution import execution_manager
