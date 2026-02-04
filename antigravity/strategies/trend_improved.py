@@ -113,6 +113,7 @@ class GoldenCrossImproved(BaseStrategy):
                                    stop_loss=stop_loss,
                                    take_profit_levels=tp_objects,
                                    reason="GoldenCross Improved",
-                                   leverage=self.config.leverage)
+                                   leverage=self.config.leverage,
+                                   risk_percentage=self.config.risk_per_trade)
 
         return None
