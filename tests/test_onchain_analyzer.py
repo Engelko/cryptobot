@@ -17,33 +17,27 @@ class TestOnchainAnalyzer(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.patcher.stop()
 
-    async def test_messari_netflow_bullish(self):
-        """Test: Negative netflow (outflow) should contribute to bullish score."""
-        with patch.object(self.analyzer, '_get_messari_netflow', new_callable=AsyncMock) as mock_netflow, \
-             patch.object(self.analyzer, '_get_fear_greed_index', new_callable=AsyncMock) as mock_fng:
-
-            mock_netflow.return_value = -2000.0
-            mock_fng.return_value = 30
+    async def test_fear_greed_bullish(self):
+        """Test: Low Fear & Greed index should contribute to bullish score (Messari disabled)."""
+        with patch.object(self.analyzer, '_get_fear_greed_index', new_callable=AsyncMock) as mock_fng:
+            mock_fng.return_value = 20 # Extreme Fear
 
             await self.analyzer.fetch_onchain_data()
 
         score = self.analyzer.get_score()
-        # netflow -2000 (bullish) + fear 30 (bullish) should be >= 0.7
-        self.assertGreaterEqual(score, 0.7, f"Expected bullish score, got {score}")
+        # F&G 20 should be 0.8
+        self.assertEqual(score, 0.8, f"Expected bullish score 0.8, got {score}")
 
-    async def test_fear_greed_extreme_greed(self):
-        """Test: High fear & greed index should contribute to bearish score."""
-        with patch.object(self.analyzer, '_get_messari_netflow', new_callable=AsyncMock) as mock_netflow, \
-             patch.object(self.analyzer, '_get_fear_greed_index', new_callable=AsyncMock) as mock_fng:
-
-            mock_netflow.return_value = 1000.0
-            mock_fng.return_value = 85
+    async def test_fear_greed_bearish(self):
+        """Test: High Fear & Greed index should contribute to bearish score (Messari disabled)."""
+        with patch.object(self.analyzer, '_get_fear_greed_index', new_callable=AsyncMock) as mock_fng:
+            mock_fng.return_value = 80 # Extreme Greed
 
             await self.analyzer.fetch_onchain_data()
 
         score = self.analyzer.get_score()
-        # netflow 1000 (bearish) + greed 85 (bearish) should be <= 0.4
-        self.assertLessEqual(score, 0.4, f"Expected bearish score, got {score}")
+        # F&G 80 should be 0.2
+        self.assertEqual(score, 0.2, f"Expected bearish score 0.2, got {score}")
 
     async def test_volume_spike_detection(self):
         """Test: 2x volume spike detection."""
@@ -65,9 +59,9 @@ class TestOnchainAnalyzer(unittest.IsolatedAsyncioTestCase):
         """Test: Internal cache prevents unnecessary API calls."""
         self.analyzer._score_cache = {"value": 0.77, "timestamp": time.time()}
 
-        with patch.object(self.analyzer, '_get_messari_netflow', new_callable=AsyncMock) as mock_messari:
+        with patch.object(self.analyzer, '_get_fear_greed_index', new_callable=AsyncMock) as mock_fng:
             await self.analyzer.fetch_onchain_data()
-            mock_messari.assert_not_called()
+            mock_fng.assert_not_called()
 
     async def test_whale_safety_timer(self):
         """Test: is_whale_safe returns False for 30 mins after spike."""

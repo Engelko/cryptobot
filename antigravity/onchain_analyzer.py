@@ -28,19 +28,9 @@ class OnchainAnalyzer:
         self.coingecko_api_key = getattr(settings, "COINGECKO_API_KEY", "")
         self.messari_api_key = getattr(settings, "MESSARI_API_KEY", "")
 
-        # CoinGecko API Configuration
-        # Default to Demo API. If key starts with CG- and COINGECKO_PRO=True, use Pro.
-        self.cg_is_pro = getattr(settings, "COINGECKO_PRO", False)
-        if self.coingecko_api_key.startswith("CG-"):
-            if self.cg_is_pro:
-                self.cg_base_url = "https://pro-api.coingecko.com/api/v3"
-                self.cg_header = "x-cg-pro-api-key"
-            else:
-                self.cg_base_url = "https://api.coingecko.com/api/v3"
-                self.cg_header = "x-cg-demo-api-key"
-        else:
-            self.cg_base_url = "https://api.coingecko.com/api/v3"
-            self.cg_header = None
+        # CoinGecko API Configuration - Using Public API (No keys)
+        self.cg_base_url = "https://api.coingecko.com/api/v3"
+        self.cg_header = None
 
         # Cache management
         self._score_cache = {"value": 0.5, "timestamp": 0, "netflow": 0.0, "fear_greed": 50}
@@ -56,33 +46,19 @@ class OnchainAnalyzer:
 
     async def fetch_onchain_data(self) -> None:
         """
-        Fetch market sentiment from Messari (Exchange Flows) + Alternative.me (Fear & Greed).
-        Replaces Glassnode logic.
+        Fetch market sentiment from Alternative.me (Fear & Greed).
+        Messari (Exchange Flows) is disabled for now due to regional blocks.
         """
         # 1. Check Cache
         if time.time() - self._score_cache['timestamp'] < (self.score_cache_ttl * self.backoff_multiplier):
             logger.debug("onchain_score_cached", score=self._score_cache['value'])
             return
 
-        if not self.messari_api_key:
-            logger.warning("messari_key_missing", message="Using default neutral score")
-            self._score_cache = {"value": 0.5, "timestamp": time.time()}
-            return
-
         try:
             async with aiohttp.ClientSession() as session:
-                # Parallel fetch
-                results = await asyncio.gather(
-                    self._get_messari_netflow(session),
-                    self._get_fear_greed_index(session),
-                    return_exceptions=True
-                )
-
-                netflow = results[0] if not isinstance(results[0], Exception) else 0.0
-                fear_greed = results[1] if not isinstance(results[1], Exception) else 50
-
-                if isinstance(results[0], Exception) or isinstance(results[1], Exception):
-                    logger.error("onchain_fetch_partial_error", netflow_err=str(results[0]), fng_err=str(results[1]))
+                # Messari disabled for now.
+                netflow = 0.0
+                fear_greed = await self._get_fear_greed_index(session)
 
                 # 3. Compute sentiment score
                 score = self._compute_sentiment_score(netflow, fear_greed)
@@ -108,10 +84,6 @@ class OnchainAnalyzer:
         # 1. Check Cache
         if time.time() - self._whale_cache['timestamp'] < (self.whale_cache_ttl * self.backoff_multiplier):
             logger.debug("whale_check_cached", safe=self._whale_cache['safe'])
-            return
-
-        if not self.coingecko_api_key:
-            self._whale_cache = {"safe": True, "timestamp": time.time()}
             return
 
         try:
@@ -235,7 +207,16 @@ class OnchainAnalyzer:
         Logic:
         - netflow < 0 and fear_greed < 40 -> 0.8 (Bullish: Outflow + Fear)
         - netflow > 0 and fear_greed > 70 -> 0.2 (Bearish: Inflow + Greed)
+        - If netflow is 0 (Messari disabled), rely on Fear & Greed index.
         """
+        # If netflow is 0.0 (e.g. Messari disabled), rely purely on Fear & Greed
+        if netflow == 0.0:
+            if fear_greed < 25: return 0.8   # Extreme Fear -> Bullish
+            if fear_greed < 45: return 0.65  # Fear -> Lean Bullish
+            if fear_greed > 75: return 0.2   # Extreme Greed -> Bearish
+            if fear_greed > 55: return 0.35  # Greed -> Lean Bearish
+            return 0.5 # Neutral
+
         # Normalize netflow to -1 to +1 (typical range -5000 to 5000 BTC/day)
         netflow_normalized = max(-1.0, min(1.0, netflow / 5000.0))
         fear_greed_normalized = fear_greed / 100.0
@@ -262,11 +243,6 @@ class OnchainAnalyzer:
         }
 
         headers = {}
-        if self.cg_header and self.coingecko_api_key:
-            headers[self.cg_header] = self.coingecko_api_key
-        elif self.coingecko_api_key:
-            # Fallback for old style keys or if header not determined
-            params["api_key"] = self.coingecko_api_key
 
         async with session.get(url, headers=headers, params=params, timeout=15) as resp:
             if resp.status == 429:
