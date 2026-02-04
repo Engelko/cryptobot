@@ -60,9 +60,15 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         lower_bound = prev["close"] - (prev["atr"] * self.config.multiplier)
 
         if curr["close"] > upper_bound:
-             return Signal(SignalType.BUY, symbol, curr["close"], reason="Volatility Breakout (Up)", leverage=self.config.leverage)
+             return Signal(SignalType.BUY, symbol, curr["close"],
+                           reason="Volatility Breakout (Up)",
+                           leverage=self.config.leverage,
+                           risk_percentage=self.config.risk_per_trade)
 
         if curr["close"] < lower_bound:
-             return Signal(SignalType.SELL, symbol, curr["close"], reason="Volatility Breakout (Down)", leverage=self.config.leverage)
+             return Signal(SignalType.SELL, symbol, curr["close"],
+                           reason="Volatility Breakout (Down)",
+                           leverage=self.config.leverage,
+                           risk_percentage=self.config.risk_per_trade)
 
         return None

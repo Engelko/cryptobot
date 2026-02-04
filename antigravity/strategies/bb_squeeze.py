@@ -99,8 +99,14 @@ class BBSqueezeStrategy(BaseStrategy):
             self.state[symbol]["was_squeezed"] = False
 
             if momentum > 0:
-                return Signal(SignalType.BUY, symbol, curr["close"], reason="BB Squeeze Fire (Long)", leverage=self.config.leverage)
+                return Signal(SignalType.BUY, symbol, curr["close"],
+                              reason="BB Squeeze Fire (Long)",
+                              leverage=self.config.leverage,
+                              risk_percentage=self.config.risk_per_trade)
             elif momentum < 0:
-                return Signal(SignalType.SELL, symbol, curr["close"], reason="BB Squeeze Fire (Short)", leverage=self.config.leverage)
+                return Signal(SignalType.SELL, symbol, curr["close"],
+                              reason="BB Squeeze Fire (Short)",
+                              leverage=self.config.leverage,
+                              risk_percentage=self.config.risk_per_trade)
 
         return None
