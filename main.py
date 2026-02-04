@@ -50,6 +50,31 @@ async def shutdown(signal, loop):
     logger.info("system_shutdown_complete", tasks_cancelled=len(tasks))
     loop.stop()
 
+def is_strategy_enabled(strategy_config, yaml_key, env_names):
+    """
+    Check if strategy should be enabled.
+    Priority:
+    1. If ACTIVE_STRATEGIES in .env is not empty, it acts as an exclusive list.
+    2. Otherwise, use the 'enabled' flag from strategies.yaml.
+    """
+    if not strategy_config:
+        return False
+
+    active_env = settings.ACTIVE_STRATEGIES
+
+    # If ACTIVE_STRATEGIES is set in .env, it takes precedence as an exclusive filter
+    if active_env and (isinstance(active_env, list) and len(active_env) > 0 or isinstance(active_env, str) and len(active_env) > 0):
+        if isinstance(active_env, str):
+            active_env = [s.strip() for s in active_env.split(",")]
+
+        for name in env_names:
+            if name in active_env:
+                return True
+        return False # Not in the active list
+
+    # Fallback to YAML configuration
+    return strategy_config.enabled
+
 async def main():
     # 1. Setup Logging
     configure_logging()
@@ -61,31 +86,31 @@ async def main():
 
     # 3. Initialize Strategies
     
-    if config.trend_following and config.trend_following.enabled:
+    if is_strategy_enabled(config.trend_following, "trend_following", ["MACD_Trend", "GoldenCross", "TrendFollowing"]):
         strategy_engine.register_strategy(TrendFollowingStrategy(config.trend_following, symbols))
         logger.info("strategy_registered", name="TrendFollowing")
 
-    if config.mean_reversion and config.mean_reversion.enabled:
+    if is_strategy_enabled(config.mean_reversion, "mean_reversion", ["RSI_Reversion", "BollingerRSI", "MeanReversion"]):
         strategy_engine.register_strategy(MeanReversionStrategy(config.mean_reversion, symbols))
         logger.info("strategy_registered", name="MeanReversion")
 
-    if config.volatility_breakout and config.volatility_breakout.enabled:
+    if is_strategy_enabled(config.volatility_breakout, "volatility_breakout", ["ATRBreakout", "VolatilityBreakout"]):
         strategy_engine.register_strategy(VolatilityBreakoutStrategy(config.volatility_breakout, symbols))
         logger.info("strategy_registered", name="VolatilityBreakout")
 
-    if config.scalping and config.scalping.enabled:
+    if is_strategy_enabled(config.scalping, "scalping", ["StochScalp", "Scalping"]):
         strategy_engine.register_strategy(ScalpingStrategy(config.scalping, symbols))
         logger.info("strategy_registered", name="Scalping")
 
-    if config.bb_squeeze and config.bb_squeeze.enabled:
+    if is_strategy_enabled(config.bb_squeeze, "bb_squeeze", ["BBSqueeze"]):
         strategy_engine.register_strategy(BBSqueezeStrategy(config.bb_squeeze, symbols))
         logger.info("strategy_registered", name="BBSqueeze")
 
-    if config.grid and config.grid.enabled:
+    if is_strategy_enabled(config.grid, "grid", ["GridMaster", "Grid"]):
         strategy_engine.register_strategy(GridStrategy(config.grid, symbols))
         logger.info("strategy_registered", name="Grid")
 
-    if config.dynamic_risk_leverage and config.dynamic_risk_leverage.enabled:
+    if is_strategy_enabled(config.dynamic_risk_leverage, "dynamic_risk_leverage", ["DynamicRiskLeverage"]):
         strategy_engine.register_strategy(DynamicRiskLeverageStrategy(config.dynamic_risk_leverage, symbols))
         logger.info("strategy_registered", name="DynamicRiskLeverage")
 
