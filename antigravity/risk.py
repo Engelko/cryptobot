@@ -226,6 +226,12 @@ class RiskManager:
             return
 
         equity = await self.get_equity()
+
+        # Auto-initialize initial_deposit if it's 0.0
+        if self.initial_deposit <= 0:
+            self.initial_deposit = equity
+            logger.info("risk_auto_init_deposit", amount=self.initial_deposit)
+
         equity_ratio = equity / self.initial_deposit if self.initial_deposit > 0 else 1.0
 
         if equity_ratio < settings.EMERGENCY_THRESHOLD:
