@@ -103,6 +103,20 @@ class BybitClient:
         res = await self._request("GET", endpoint, params)
         return res.get("list", [])
 
+    async def get_ticker(self, symbol: str, category: str = "linear") -> Dict:
+        """
+        Get ticker data for a symbol.
+        """
+        endpoint = "/v5/market/tickers"
+        params = {
+            "category": category,
+            "symbol": symbol
+        }
+        res = await self._request("GET", endpoint, params)
+        if res and "list" in res and len(res["list"]) > 0:
+            return res["list"][0]
+        return {}
+
     async def get_orderbook(self, symbol: str, category: str = "linear", limit: int = 25) -> Dict:
         """
         Get orderbook data.

@@ -244,6 +244,15 @@ class RealBroker:
 
             log.info("real_execution_start", symbol=signal.symbol, available_balance=available_balance)
 
+            # Ensure we have a valid price for PnL estimation and sizing
+            if not signal.price or signal.price <= 0:
+                try:
+                    ticker = await client.get_ticker(signal.symbol, category)
+                    signal.price = safe_float(ticker.get("lastPrice", 0))
+                    log.info("market_order_price_estimated", symbol=signal.symbol, estimated_price=signal.price)
+                except Exception as e:
+                    log.error("ticker_fetch_failed_for_estimation", error=str(e))
+
             # Check for existing position to determine intent (Open vs Close)
             # Bybit V5: get_positions only supports linear or option. Spot uses wallet balance.
             positions = []
@@ -267,6 +276,39 @@ class RealBroker:
             # BUY SIGNAL
             # ---------------------------------------------------------
             if signal.type == SignalType.BUY:
+                if short_pos:
+                    # CLOSE SHORT
+                    qty_to_close = short_pos["size"]
+                    log.info("real_buy_closing_short", symbol=signal.symbol, size=qty_to_close)
+
+                    safe_trace_id = trace_id.replace("-", "")[:30]
+                    res = await client.place_order(
+                        category=category,
+                        symbol=signal.symbol,
+                        side="Buy",
+                        orderType="Market",
+                        qty=qty_to_close,
+                        orderLinkId=f"{safe_trace_id}-cs"
+                    )
+
+                    if res and "orderId" in res:
+                        log.info("real_buy_close_short_filled", order_id=res["orderId"])
+                        # Estimate PnL
+                        try:
+                            entry = safe_float(short_pos.get("avgPrice", 0))
+                            exit_p = safe_float(signal.price)
+                            qty_f = safe_float(qty_to_close)
+                            pnl = (entry - exit_p) * qty_f
+                            fees = FeeConfig.estimate_fee(qty_f, entry, "linear") + FeeConfig.estimate_fee(qty_f, exit_p, "linear")
+                            net_pnl = pnl - fees
+                            db.save_trade(signal.symbol, "BUY", exit_p, qty_f, 0.0, strategy_name, exec_type="REAL", pnl=net_pnl)
+                            await event_bus.publish(TradeClosedEvent(symbol=signal.symbol, pnl=net_pnl, strategy=strategy_name, execution_type="REAL"))
+                        except Exception as e:
+                            log.error("short_pnl_estimation_error", error=str(e))
+
+                if signal.reason == "LOCAL_CASCADE_STOP" or signal.reason == "RiskManager_Emergency":
+                    return
+
                 # Trade Sizing
                 max_size = settings.MAX_POSITION_SIZE
                 
@@ -455,15 +497,11 @@ class RealBroker:
 
                 if long_pos:
                     # CLOSE LONG
-                    qty_to_close = long_pos["size"] # Already formatted by API?
-                    # API returns string, usually correct format. But let's be safe?
-                    # Usually closing matches open size exactly.
-
+                    qty_to_close = long_pos["size"]
                     log.info("real_sell_closing_long", symbol=signal.symbol, size=qty_to_close)
 
-                    # Idempotency: Generate orderLinkId
                     safe_trace_id = trace_id.replace("-", "")[:30]
-                    order_link_id = f"{safe_trace_id}-close-long"
+                    order_link_id = f"{safe_trace_id}-cl"
 
                     res = await client.place_order(
                         category=category,
@@ -475,7 +513,7 @@ class RealBroker:
                     )
 
                     if res and "orderId" in res:
-                        log.info("real_sell_close_filled", order_id=res["orderId"], order_link_id=order_link_id)
+                        log.info("real_sell_close_filled", order_id=res["orderId"])
 
                         # Estimate PnL
                         try:
@@ -483,134 +521,132 @@ class RealBroker:
                             exit_p = safe_float(signal.price)
                             qty_f = safe_float(qty_to_close)
                             pnl = (exit_p - entry) * qty_f
-
-                            # Deduct Estimated Fees (Entry Taker + Exit Taker approx)
                             fees = FeeConfig.estimate_fee(qty_f, entry, "linear") + FeeConfig.estimate_fee(qty_f, exit_p, "linear")
                             net_pnl = pnl - fees
-                            log.info("real_pnl_calc", gross_pnl=pnl, fees=fees, net_pnl=net_pnl)
-
                             db.save_trade(signal.symbol, "SELL", exit_p, qty_f, 0.0, strategy_name, exec_type="REAL", pnl=net_pnl)
                             await event_bus.publish(TradeClosedEvent(symbol=signal.symbol, pnl=net_pnl, strategy=strategy_name, execution_type="REAL"))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.error("long_pnl_estimation_error", error=str(e))
                     else:
                         log.error("real_sell_close_failed", res=res)
 
+                if signal.reason == "LOCAL_CASCADE_STOP" or signal.reason == "RiskManager_Emergency":
+                    return
+
+                # OPEN SHORT (Flat or already Short)
+                max_size = settings.MAX_POSITION_SIZE
+
+                # Use leverage from signal if available, otherwise default to 1x
+                leverage_multiplier = signal.leverage if signal.leverage is not None else 1.0
+
+                # SET LEVERAGE ON EXCHANGE before placing order
+                if category == "linear" and signal.leverage and signal.leverage > 0:
+                    leverage_set_success = await self._set_leverage(signal.symbol, signal.leverage)
+                    if not leverage_set_success:
+                        log.error("leverage_set_failed_abort", symbol=signal.symbol, requested=signal.leverage)
+                        # Save execution failure to DB
+                        db.save_trade(
+                            symbol=signal.symbol,
+                            side="SELL",
+                            price=signal.price or 0.0,
+                            qty=0.0,
+                            val=0.0,
+                            strat=strategy_name,
+                            exec_type="FAILED",
+                            pnl=0.0
+                        )
+                        # ABORT: Do not execute trade with incorrect leverage
+                        raise LeverageRejection(f"Failed to set leverage to {signal.leverage}x")
+                    else:
+                        log.info("leverage_set_success", symbol=signal.symbol, leverage=f"{signal.leverage}x")
+
+                price = signal.price if signal.price is not None else 0.0
+                if price <= 0:
+                    log.error("Invalid price for signal")
+                    return
+
+                if signal.quantity and signal.quantity > 0:
+                    qty = signal.quantity
+                    # Double check safety (clamp to max_size just in case)
+                    notional = qty * price
+                    if notional > max_size:
+                        qty = max_size / price
+                        log.warning("real_sell_clamped_max_size", original=signal.quantity, clamped=qty)
+
+                    # Also clamp to available balance (margin check)
+                    required_margin = (qty * price) / leverage_multiplier
+                    if required_margin > available_balance:
+                        # Resize to fit balance
+                        qty = (available_balance * leverage_multiplier) / price
+                        log.warning("real_sell_clamped_balance", original=signal.quantity, clamped=qty, balance=available_balance)
+
+                    trade_size = qty * price
                 else:
-                    # OPEN SHORT (Flat or already Short)
-                    max_size = settings.MAX_POSITION_SIZE
-                    
-                    # Use leverage from signal if available, otherwise default to 1x
-                    leverage_multiplier = signal.leverage if signal.leverage is not None else 1.0
-                    
-                    # SET LEVERAGE ON EXCHANGE before placing order
-                    if category == "linear" and signal.leverage and signal.leverage > 0:
-                        leverage_set_success = await self._set_leverage(signal.symbol, signal.leverage)
-                        if not leverage_set_success:
-                            log.error("leverage_set_failed_abort", symbol=signal.symbol, requested=signal.leverage)
-                            # Save execution failure to DB
-                            db.save_trade(
-                                symbol=signal.symbol,
-                                side="SELL",
-                                price=signal.price or 0.0,
-                                qty=0.0,
-                                val=0.0,
-                                strat=strategy_name,
-                                exec_type="FAILED",
-                                pnl=0.0
+                    # Legacy logic: Maximize trade
+                    # STRICT FIX: MAX_POSITION_SIZE is NOTIONAL limit.
+
+                    # 1. Cap by Notional Limit (Budget)
+                    target_notional = max_size
+
+                    # 2. Cap by Available Margin
+                    wallet_max_notional = available_balance * leverage_multiplier
+
+                    trade_size = min(target_notional, wallet_max_notional)
+                    qty = trade_size / price
+
+                if trade_size < 10.0:
+                    log.warning("real_sell_insufficient_funds", available=available_balance, required=10.0, planned_trade_size=trade_size)
+                    raise BalanceRejection(f"Insufficient funds: trade size ${trade_size:.2f} < $10.0")
+
+                qty_str = self._format_qty(signal.symbol, qty)
+                qty_f = safe_float(qty_str)
+
+                if qty_f <= 0:
+                     log.warning("real_sell_qty_zero", symbol=signal.symbol, qty=qty_str)
+                     return
+
+                # Liquidity Check
+                if not await self._check_liquidity(signal.symbol, category, qty_f):
+                    log.warning("real_sell_liquidity_fail_abort", symbol=signal.symbol)
+                    return
+
+                log.info("real_sell_opening_short", symbol=signal.symbol, qty=qty_str)
+
+                # Calculate Estimated Fees
+                estimated_fee = FeeConfig.estimate_fee(qty_f, price, "linear", is_maker=False)
+                log.info("fee_estimation", symbol=signal.symbol, side="Sell", fee=estimated_fee)
+
+                # Place Order with Cascade Stops
+                safe_trace_id = trace_id.replace("-", "")[:30]
+                order_link_id = f"{safe_trace_id}-open-short"
+
+                # Level 1: Hard SL and Trailing Stop
+                sl_price = self._format_price(signal.symbol, signal.stop_loss) if hasattr(signal, "stop_loss") and signal.stop_loss else None
+                ts_dist = self._format_price(signal.symbol, price * settings.TRAILING_STOP_TRIGGER)
+
+                res = await client.place_order(
+                    category=category,
+                    symbol=symbol if (symbol := signal.symbol) else "",
+                    side="Sell",
+                    orderType="Market",
+                    qty=qty_str,
+                    orderLinkId=order_link_id,
+                    stopLoss=sl_price,
+                    trailingStop=ts_dist
+                )
+
+                if res and "orderId" in res:
+                    log.info("real_sell_short_filled", order_id=res["orderId"], qty=qty_str, order_link_id=order_link_id)
+                    db.save_trade(signal.symbol, "SELL", price, qty_f, trade_size, strategy_name, exec_type="REAL")
+
+                    # Create partial take-profit orders if provided
+                    if signal.take_profit_levels:
+                        if price > 0:
+                            await self._create_partial_take_profit_orders(
+                                signal.symbol, "Sell", qty_f, signal.take_profit_levels, price
                             )
-                            # ABORT: Do not execute trade with incorrect leverage
-                            raise LeverageRejection(f"Failed to set leverage to {signal.leverage}x")
-                        else:
-                            log.info("leverage_set_success", symbol=signal.symbol, leverage=f"{signal.leverage}x")
-                    
-                    price = signal.price if signal.price is not None else 0.0
-                    if price <= 0:
-                        log.error("Invalid price for signal")
-                        return
-
-                    if signal.quantity and signal.quantity > 0:
-                        qty = signal.quantity
-                        # Double check safety (clamp to max_size just in case)
-                        notional = qty * price
-                        if notional > max_size:
-                            qty = max_size / price
-                            log.warning("real_sell_clamped_max_size", original=signal.quantity, clamped=qty)
-
-                        # Also clamp to available balance (margin check)
-                        required_margin = (qty * price) / leverage_multiplier
-                        if required_margin > available_balance:
-                            # Resize to fit balance
-                            qty = (available_balance * leverage_multiplier) / price
-                            log.warning("real_sell_clamped_balance", original=signal.quantity, clamped=qty, balance=available_balance)
-
-                        trade_size = qty * price
-                    else:
-                        # Legacy logic: Maximize trade
-                        # STRICT FIX: MAX_POSITION_SIZE is NOTIONAL limit.
-
-                        # 1. Cap by Notional Limit (Budget)
-                        target_notional = max_size
-
-                        # 2. Cap by Available Margin
-                        wallet_max_notional = available_balance * leverage_multiplier
-
-                        trade_size = min(target_notional, wallet_max_notional)
-                        qty = trade_size / price
-
-                    if trade_size < 10.0:
-                        log.warning("real_sell_insufficient_funds", available=available_balance, required=10.0, planned_trade_size=trade_size)
-                        raise BalanceRejection(f"Insufficient funds: trade size ${trade_size:.2f} < $10.0")
-
-                    qty_str = self._format_qty(signal.symbol, qty)
-                    qty_f = safe_float(qty_str)
-
-                    if qty_f <= 0:
-                         log.warning("real_sell_qty_zero", symbol=signal.symbol, qty=qty_str)
-                         return
-
-                    # Liquidity Check
-                    if not await self._check_liquidity(signal.symbol, category, qty_f):
-                        log.warning("real_sell_liquidity_fail_abort", symbol=signal.symbol)
-                        return
-
-                    log.info("real_sell_opening_short", symbol=signal.symbol, qty=qty_str)
-
-                    # Calculate Estimated Fees
-                    estimated_fee = FeeConfig.estimate_fee(qty_f, price, "linear", is_maker=False)
-                    log.info("fee_estimation", symbol=signal.symbol, side="Sell", fee=estimated_fee)
-
-                    # Place Order with Cascade Stops
-                    safe_trace_id = trace_id.replace("-", "")[:30]
-                    order_link_id = f"{safe_trace_id}-open-short"
-
-                    # Level 1: Hard SL and Trailing Stop
-                    sl_price = self._format_price(signal.symbol, signal.stop_loss) if hasattr(signal, "stop_loss") and signal.stop_loss else None
-                    ts_dist = self._format_price(signal.symbol, price * settings.TRAILING_STOP_TRIGGER)
-
-                    res = await client.place_order(
-                        category=category,
-                        symbol=symbol if (symbol := signal.symbol) else "",
-                        side="Sell",
-                        orderType="Market",
-                        qty=qty_str,
-                        orderLinkId=order_link_id,
-                        stopLoss=sl_price,
-                        trailingStop=ts_dist
-                    )
-
-                    if res and "orderId" in res:
-                        log.info("real_sell_short_filled", order_id=res["orderId"], qty=qty_str, order_link_id=order_link_id)
-                        db.save_trade(signal.symbol, "SELL", price, qty_f, trade_size, strategy_name, exec_type="REAL")
-                        
-                        # Create partial take-profit orders if provided
-                        if signal.take_profit_levels:
-                            if price > 0:
-                                await self._create_partial_take_profit_orders(
-                                    signal.symbol, "Sell", qty_f, signal.take_profit_levels, price
-                                )
-                    else:
-                        log.error("real_sell_short_failed", res=res)
+                else:
+                    log.error("real_sell_short_failed", res=res)
 
         except ExecutionRejection:
             # Re-raise business rejections to be handled by engine

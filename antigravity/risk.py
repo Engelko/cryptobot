@@ -72,11 +72,13 @@ class RiskManager:
             db.update_risk_state(self.current_daily_loss, self.last_reset_date, self.consecutive_loss_days)
 
     async def _handle_trade_closed(self, event: TradeClosedEvent):
-        if event.pnl < 0:
-            self._check_reset()
-            self.current_daily_loss += abs(event.pnl)
-            db.update_risk_state(self.current_daily_loss, self.last_reset_date, self.consecutive_loss_days)
-            logger.info("risk_loss_updated", added_loss=abs(event.pnl), total_daily_loss=self.current_daily_loss)
+        self._check_reset()
+        # Track Net Daily Loss (Losses - Profits)
+        # If event.pnl is positive (profit), it reduces current_daily_loss
+        # If event.pnl is negative (loss), it increases current_daily_loss
+        self.current_daily_loss -= event.pnl
+        db.update_risk_state(self.current_daily_loss, self.last_reset_date, self.consecutive_loss_days)
+        logger.info("risk_pnl_updated", pnl=event.pnl, total_daily_loss=self.current_daily_loss)
 
     async def _handle_order_update(self, event: OrderUpdateEvent):
         """Track positions for local monitoring."""
