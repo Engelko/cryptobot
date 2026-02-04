@@ -254,7 +254,7 @@ class RiskManager:
                     mode=self.trading_mode.value,
                     consecutive_losses=self.consecutive_loss_days)
 
-    async def check_signal(self, signal: Signal) -> bool:
+    async def check_signal(self, signal: Signal) -> tuple[bool, str]:
         self._check_reset()
 
         # Only update trading mode if it's not already in EMERGENCY_STOP
@@ -267,7 +267,7 @@ class RiskManager:
             await telegram_alerts.send_message("🚨 <b>EMERGENCY STOP</b>\nEquity dropped below 50% threshold.")
             # In emergency stop, we might want to close all positions too
             await self._close_all_positions()
-            return False
+            return False, "EMERGENCY_STOP: Equity < 50%"
 
         if self.current_daily_loss >= settings.MAX_DAILY_LOSS:
             logger.warning("risk_block", reason="daily_loss_limit_exceeded",
@@ -275,10 +275,10 @@ class RiskManager:
             await telegram_alerts.send_message(f"⚠️ <b>DAILY LOSS LIMIT REACHED</b>\nCurrent: -${self.current_daily_loss:.2f}")
             # Close all positions on daily limit hit
             await self._close_all_positions()
-            return False
+            return False, f"Daily loss limit reached (${self.current_daily_loss:.2f})"
 
         if await self._is_reduce_only(signal):
-            return True
+            return True, "Reduce-only order accepted"
 
         balance = await self._get_balance()
         leverage = signal.leverage if signal.leverage and signal.leverage > 0 else 1.0
@@ -317,11 +317,11 @@ class RiskManager:
         if signal.price and signal.price > 0:
             target_qty = target_size / signal.price
             if target_size < MIN_ORDER_COST:
-                return False
+                return False, f"Size too small: ${target_size:.2f} < ${MIN_ORDER_COST}"
             signal.quantity = target_qty
 
         signal.stop_loss = signal.price * (1 - settings.STOP_LOSS_PCT) if signal.type == SignalType.BUY else signal.price * (1 + settings.STOP_LOSS_PCT)
-        return True
+        return True, signal.reason
 
     async def _close_all_positions(self):
         symbols = list(self.active_positions.keys())

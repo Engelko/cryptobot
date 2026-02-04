@@ -15,6 +15,22 @@ import structlog
 
 logger = get_logger("execution")
 
+class ExecutionRejection(Exception):
+    """Base class for business-level order rejections."""
+    pass
+
+class LiquidityRejection(ExecutionRejection):
+    """Rejected due to spread or depth."""
+    pass
+
+class BalanceRejection(ExecutionRejection):
+    """Rejected due to insufficient margin/balance."""
+    pass
+
+class LeverageRejection(ExecutionRejection):
+    """Rejected due to failure to set leverage."""
+    pass
+
 # Hardcoded Precision Map for Testnet/Linear
 # Based on typical Bybit specs.
 # Safe fallback: Floor to these decimals.
@@ -192,7 +208,7 @@ class RealBroker:
 
             if spread > settings.MAX_SPREAD:
                 logger.warning("liquidity_check_failed", symbol=symbol, reason="spread_too_high", spread=spread, limit=settings.MAX_SPREAD)
-                return False
+                raise LiquidityRejection(f"Spread too high: {spread:.4%}")
 
             # Depth check: Top 3 levels > 2x order size
             depth_bids = sum(safe_float(b[1]) for b in bids[:3])
@@ -201,7 +217,7 @@ class RealBroker:
             if depth_bids < 2 * qty or depth_asks < 2 * qty:
                 logger.warning("liquidity_check_failed", symbol=symbol, reason="insufficient_depth",
                                depth_bids=depth_bids, depth_asks=depth_asks, required=2*qty)
-                return False
+                raise LiquidityRejection(f"Insufficient depth: bids={depth_bids:.2f}, asks={depth_asks:.2f}, req={2*qty:.2f}")
 
             return True
         except Exception as e:
@@ -274,7 +290,7 @@ class RealBroker:
                             pnl=0.0
                         )
                         # ABORT: Do not execute trade with incorrect leverage
-                        return
+                        raise LeverageRejection(f"Failed to set leverage to {signal.leverage}x")
                     else:
                         log.info("leverage_set_success", symbol=signal.symbol, leverage=f"{signal.leverage}x")
                 
@@ -324,7 +340,7 @@ class RealBroker:
                 # Min Order Check
                 if trade_size < 10.0:
                     log.warning("real_insufficient_funds", available=available_balance, required=10.0, planned_trade_size=trade_size)
-                    return
+                    raise BalanceRejection(f"Insufficient funds: trade size ${trade_size:.2f} < $10.0")
 
                 qty_str = self._format_qty(signal.symbol, qty)
 
@@ -394,18 +410,18 @@ class RealBroker:
                 if category == "spot":
                     # Spot Market Sell: qty is base coin
                     # We need to find how much we have.
-                    # For simplicity, we use signal.quantity or fetch balance.
-                    balance_data = await client.get_wallet_balance(coin=signal.symbol.replace("USDT", ""))
+                    base_coin = signal.symbol.replace("USDT", "")
+                    balance_data = await client.get_wallet_balance(coin=base_coin)
                     # Extract coin balance
                     coin_qty = 0.0
                     if "coin" in balance_data:
                         for c in balance_data["coin"]:
-                             if c["coin"] in signal.symbol:
+                             if c["coin"] == base_coin:
                                  coin_qty = safe_float(c.get("walletBalance", 0))
 
                     if coin_qty <= 0:
                         log.warning("spot_sell_no_balance", symbol=signal.symbol)
-                        return
+                        raise BalanceRejection(f"No spot balance for {base_coin}")
 
                     qty_str = self._format_qty(signal.symbol, coin_qty)
                     res = await client.place_order(
@@ -504,7 +520,7 @@ class RealBroker:
                                 pnl=0.0
                             )
                             # ABORT: Do not execute trade with incorrect leverage
-                            return
+                            raise LeverageRejection(f"Failed to set leverage to {signal.leverage}x")
                         else:
                             log.info("leverage_set_success", symbol=signal.symbol, leverage=f"{signal.leverage}x")
                     
@@ -544,7 +560,7 @@ class RealBroker:
 
                     if trade_size < 10.0:
                         log.warning("real_sell_insufficient_funds", available=available_balance, required=10.0, planned_trade_size=trade_size)
-                        return
+                        raise BalanceRejection(f"Insufficient funds: trade size ${trade_size:.2f} < $10.0")
 
                     qty_str = self._format_qty(signal.symbol, qty)
                     qty_f = safe_float(qty_str)
@@ -596,6 +612,9 @@ class RealBroker:
                     else:
                         log.error("real_sell_short_failed", res=res)
 
+        except ExecutionRejection:
+            # Re-raise business rejections to be handled by engine
+            raise
         except Exception as e:
             # Check if 'log' is bound (in case exception happened before binding)
             if 'log' in locals():
@@ -603,6 +622,7 @@ class RealBroker:
             else:
                 logger.error("real_execution_error", error=str(e))
             audit.log_event("EXECUTION", f"ERROR: {str(e)}", "ERROR")
+            raise
         finally:
             await client.close()
 

@@ -109,10 +109,11 @@ class GoldenCrossImproved(BaseStrategy):
                          for tp in take_profit_levels:
                              tp_objects.append(TakeProfitLevel(price=tp["price"], quantity_percentage=tp["quantity_percentage"], reason=tp["reason"]))
 
+                     reason = f"SMA {curr['fast_sma']:.1f}/{curr['slow_sma']:.1f}, ADX {curr['adx']:.1f}"
                      return Signal(stype, event.symbol, event.close,
                                    stop_loss=stop_loss,
                                    take_profit_levels=tp_objects,
-                                   reason="GoldenCross Improved",
+                                   reason=reason,
                                    leverage=self.config.leverage,
                                    risk_percentage=self.config.risk_per_trade)
 

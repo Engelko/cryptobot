@@ -111,25 +111,35 @@ def get_trading_mode(equity_ratio: float, consecutive_losses: int) -> str:
     return "NORMAL"
 
 def get_recommendation(reason: str) -> str:
-    if "[REJECTED: Risk Limit]" in reason:
-        if "daily_loss_limit_exceeded" in reason:
-            return "Wait for daily reset or increase MAX_DAILY_LOSS."
-        if "insufficient_funds" in reason:
-            return "Check wallet balance or decrease MAX_POSITION_SIZE."
-        return "Verify risk settings and available margin."
-    if "[REJECTED: AI" in reason:
+    """Provides actionable advice based on signal rejection/error reasons."""
+    r = reason.lower()
+    if "spread too high" in r or "insufficient depth" in r or "spread_too_high" in r:
+        return "Market liquidity is low. Increase 'Max Spread' in Settings if you are on Testnet, or try a different symbol."
+    if "insufficient funds" in r or "no spot balance" in r or "insufficient_funds" in r:
+        return "Ensure you have enough USDT (for BUY) or the base asset (for SPOT SELL). Check account balance."
+    if "daily loss limit reached" in r or "daily_loss_limit_exceeded" in r:
+        return "Daily loss limit hit. Wait for UTC reset or increase 'Max Daily Loss' in Settings."
+    if "emergency_stop" in r:
+        return "CRITICAL: Equity ratio < 50%. Bot stopped to prevent liquidation."
+    if "failed to set leverage" in r:
+        return "Exchange refused to set leverage. Check your Bybit position mode (One-Way recommended)."
+    if "[REJECTED: Risk Limit]" in r:
+        return "Risk Manager blocked this trade. Check daily loss or position sizing settings."
+    if "[REJECTED: Execution]" in r:
+        return "Execution was aborted due to unfavorable market conditions (liquidity/funds)."
+    if "[REJECTED: AI" in r:
         return "AI confidence too low. No action required, wait for better signals."
-    if "[REJECTED: Market Regime]" in reason:
+    if "[REJECTED: Market Regime]" in r:
         return "Market regime unsuitable for this strategy. Consider enabling other strategies."
-    if "[REJECTED: Whale Activity]" in reason:
+    if "[REJECTED: Whale Activity]" in r:
         return "Market unstable due to whale activity. Trading paused for safety."
-    if "spread_too_high" in reason:
-        return "Low liquidity. Try increasing MAX_SPREAD if you accept higher slippage."
-    if "10029" in reason:
+    if "10029" in r:
         return "Symbol not whitelisted. Check if it's available for Spot instead of Futures."
-    if "accepted" in reason.lower() or "filled" in reason.lower():
+    if "[EXECUTION ERROR]" in r:
+        return "An unexpected error occurred. Check API keys, permissions, and bot logs."
+    if "[ACCEPTED]" in r or "accepted" in r or "filled" in r:
         return "Signal executed successfully."
-    return "Check system logs for more details."
+    return "Check technical requirements and market conditions."
 
 # ===== CONFIG PERSISTENCE =====
 def save_yaml_config(new_config):
