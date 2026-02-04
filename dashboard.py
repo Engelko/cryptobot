@@ -225,6 +225,52 @@ with col_gauge:
         st.rerun()
 
     st.sidebar.divider()
+    st.sidebar.markdown("### Active Strategies")
+    try:
+        with open("strategies.yaml", "r") as f:
+            yaml_config = yaml.safe_load(f).get("strategies", {})
+
+        active_env = settings.ACTIVE_STRATEGIES
+        if isinstance(active_env, str):
+            active_env = [s.strip() for s in active_env.split(",")]
+
+        # Mapping for display
+        mapping = {
+            "trend_following": ["MACD_Trend", "GoldenCross", "TrendFollowing"],
+            "mean_reversion": ["RSI_Reversion", "BollingerRSI", "MeanReversion"],
+            "volatility_breakout": ["ATRBreakout", "VolatilityBreakout"],
+            "scalping": ["StochScalp", "Scalping"],
+            "bb_squeeze": ["BBSqueeze"],
+            "grid": ["GridMaster", "Grid"],
+            "dynamic_risk_leverage": ["DynamicRiskLeverage"],
+            "spot_recovery": ["SpotRecovery"]
+        }
+
+        for key, env_names in mapping.items():
+            conf = yaml_config.get(key, {})
+
+            # Match logic in main.py: .env takes precedence if not empty
+            if active_env and (isinstance(active_env, list) and len(active_env) > 0 or isinstance(active_env, str) and len(active_env) > 0):
+                is_active = False
+                for name in env_names:
+                    if name in active_env:
+                        is_active = True
+                        break
+            else:
+                is_active = conf.get("enabled", False)
+
+            # Special case for SpotRecovery which is always on in the engine but conditional in execution
+            if key == "spot_recovery":
+                is_active = True
+
+            if is_active:
+                st.sidebar.markdown(f"✅ **{key.replace('_', ' ').title()}**")
+            else:
+                st.sidebar.markdown(f"⚪ {key.replace('_', ' ').title()}")
+    except Exception as e:
+        st.sidebar.error(f"Error loading strategies: {e}")
+
+    st.sidebar.divider()
     st.sidebar.markdown("### Bot Parameters")
     st.sidebar.json({
         "Max Daily Loss": f"${settings.MAX_DAILY_LOSS}",
