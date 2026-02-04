@@ -9,6 +9,7 @@ from antigravity.audit import audit
 from antigravity.client import BybitClient
 from antigravity.event import event_bus, TradeClosedEvent
 from antigravity.fees import FeeConfig
+from antigravity.utils import safe_float
 import uuid
 import structlog
 
@@ -184,17 +185,18 @@ class RealBroker:
             if not bids or not asks:
                 return False
 
-            best_bid = float(bids[0][0])
-            best_ask = float(asks[0][0])
+            best_bid = safe_float(bids[0][0])
+            best_ask = safe_float(asks[0][0])
+            if best_bid <= 0: return False
             spread = (best_ask - best_bid) / best_bid
 
-            if spread > 0.001: # 0.1%
-                logger.warning("liquidity_check_failed", symbol=symbol, reason="spread_too_high", spread=spread)
+            if spread > settings.MAX_SPREAD:
+                logger.warning("liquidity_check_failed", symbol=symbol, reason="spread_too_high", spread=spread, limit=settings.MAX_SPREAD)
                 return False
 
             # Depth check: Top 3 levels > 2x order size
-            depth_bids = sum(float(b[1]) for b in bids[:3])
-            depth_asks = sum(float(a[1]) for a in asks[:3])
+            depth_bids = sum(safe_float(b[1]) for b in bids[:3])
+            depth_asks = sum(safe_float(a[1]) for a in asks[:3])
 
             if depth_bids < 2 * qty or depth_asks < 2 * qty:
                 logger.warning("liquidity_check_failed", symbol=symbol, reason="insufficient_depth",
@@ -239,9 +241,10 @@ class RealBroker:
             long_pos = None
             short_pos = None
             for p in positions:
-                if p.get("side") == "Buy" and float(p.get("size", 0)) > 0:
+                size = safe_float(p.get("size", 0))
+                if p.get("side") == "Buy" and size > 0:
                     long_pos = p
-                elif p.get("side") == "Sell" and float(p.get("size", 0)) > 0:
+                elif p.get("side") == "Sell" and size > 0:
                     short_pos = p
 
             # ---------------------------------------------------------
@@ -325,17 +328,18 @@ class RealBroker:
 
                 qty_str = self._format_qty(signal.symbol, qty)
 
-                if float(qty_str) <= 0:
+                qty_f = safe_float(qty_str)
+                if qty_f <= 0:
                      log.warning("real_buy_qty_zero", symbol=signal.symbol, qty=qty_str)
                      return
 
                 # Liquidity Check
-                if not await self._check_liquidity(signal.symbol, category, float(qty_str)):
+                if not await self._check_liquidity(signal.symbol, category, qty_f):
                     log.warning("real_buy_liquidity_fail_abort", symbol=signal.symbol)
                     return
 
                 # Calculate Estimated Fees
-                estimated_fee = FeeConfig.estimate_fee(float(qty_str), price, "linear", is_maker=False)
+                estimated_fee = FeeConfig.estimate_fee(qty_f, price, "linear", is_maker=False)
                 log.info("fee_estimation", symbol=signal.symbol, side="Buy", fee=estimated_fee)
 
                 # Place Order with Cascade Stops
@@ -373,12 +377,12 @@ class RealBroker:
 
                 if res and "orderId" in res:
                     log.info("real_buy_filled", order_id=res["orderId"], qty=qty_str, order_link_id=order_link_id)
-                    db.save_trade(signal.symbol, "BUY", price, float(qty_str), trade_size, strategy_name, exec_type="REAL")
+                    db.save_trade(signal.symbol, "BUY", price, qty_f, trade_size, strategy_name, exec_type="REAL")
                     
                     # Create partial take-profit orders if provided
                     if signal.take_profit_levels:
                         await self._create_partial_take_profit_orders(
-                            signal.symbol, "Buy", float(qty_str), signal.take_profit_levels, price
+                            signal.symbol, "Buy", qty_f, signal.take_profit_levels, price
                         )
                 else:
                     log.error("real_buy_failed", res=res)
@@ -397,7 +401,7 @@ class RealBroker:
                     if "coin" in balance_data:
                         for c in balance_data["coin"]:
                              if c["coin"] in signal.symbol:
-                                 coin_qty = float(c.get("walletBalance", 0))
+                                 coin_qty = safe_float(c.get("walletBalance", 0))
 
                     if coin_qty <= 0:
                         log.warning("spot_sell_no_balance", symbol=signal.symbol)
@@ -417,7 +421,7 @@ class RealBroker:
                         # Calculate PnL for Spot
                         net_pnl = 0.0
                         exit_p = signal.price or 0.0
-                        qty_f = float(qty_str)
+                        qty_f = safe_float(qty_str)
 
                         last_buy = db.get_last_trade(signal.symbol, "BUY")
                         if last_buy:
@@ -459,9 +463,9 @@ class RealBroker:
 
                         # Estimate PnL
                         try:
-                            entry = float(long_pos.get("avgPrice", 0) or 0)
-                            exit_p = float(signal.price or 0)
-                            qty_f = float(qty_to_close or 0)
+                            entry = safe_float(long_pos.get("avgPrice", 0))
+                            exit_p = safe_float(signal.price)
+                            qty_f = safe_float(qty_to_close)
                             pnl = (exit_p - entry) * qty_f
 
                             # Deduct Estimated Fees (Entry Taker + Exit Taker approx)
@@ -543,20 +547,21 @@ class RealBroker:
                         return
 
                     qty_str = self._format_qty(signal.symbol, qty)
+                    qty_f = safe_float(qty_str)
 
-                    if float(qty_str) <= 0:
+                    if qty_f <= 0:
                          log.warning("real_sell_qty_zero", symbol=signal.symbol, qty=qty_str)
                          return
 
                     # Liquidity Check
-                    if not await self._check_liquidity(signal.symbol, category, float(qty_str)):
+                    if not await self._check_liquidity(signal.symbol, category, qty_f):
                         log.warning("real_sell_liquidity_fail_abort", symbol=signal.symbol)
                         return
 
                     log.info("real_sell_opening_short", symbol=signal.symbol, qty=qty_str)
 
                     # Calculate Estimated Fees
-                    estimated_fee = FeeConfig.estimate_fee(float(qty_str), price, "linear", is_maker=False)
+                    estimated_fee = FeeConfig.estimate_fee(qty_f, price, "linear", is_maker=False)
                     log.info("fee_estimation", symbol=signal.symbol, side="Sell", fee=estimated_fee)
 
                     # Place Order with Cascade Stops
@@ -580,13 +585,13 @@ class RealBroker:
 
                     if res and "orderId" in res:
                         log.info("real_sell_short_filled", order_id=res["orderId"], qty=qty_str, order_link_id=order_link_id)
-                        db.save_trade(signal.symbol, "SELL", price, float(qty_str), trade_size, strategy_name, exec_type="REAL")
+                        db.save_trade(signal.symbol, "SELL", price, qty_f, trade_size, strategy_name, exec_type="REAL")
                         
                         # Create partial take-profit orders if provided
                         if signal.take_profit_levels:
                             if price > 0:
                                 await self._create_partial_take_profit_orders(
-                                    signal.symbol, "Sell", float(qty_str), signal.take_profit_levels, price
+                                    signal.symbol, "Sell", qty_f, signal.take_profit_levels, price
                                 )
                     else:
                         log.error("real_sell_short_failed", res=res)
@@ -695,13 +700,13 @@ class RealBroker:
         try:
             # 1. Unified Account
             if "totalWalletBalance" in data:
-                 return float(data.get("totalWalletBalance", 0.0))
+                 return safe_float(data.get("totalWalletBalance", 0.0))
 
             # 2. Contract Account
             elif "coin" in data:
                 for c in data["coin"]:
                     if c.get("coin") == "USDT":
-                        return float(c.get("walletBalance", 0.0))
+                        return safe_float(c.get("walletBalance", 0.0))
 
         except Exception:
             pass

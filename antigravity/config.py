@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     MAX_DAILY_LOSS: float = Field(20.0, gt=0, description="Max daily loss in USDT")
     MAX_POSITION_SIZE: float = Field(50.0, gt=0, description="Max position size in USDT")
     MAX_LEVERAGE: float = Field(3.0, gt=0, description="Max leverage")
+    MAX_SPREAD: float = Field(0.001, description="Max allowed spread for liquidity check")
     STOP_LOSS_PCT: float = Field(0.02, description="Hard stop loss percentage")
     TRAILING_STOP_TRIGGER: float = Field(0.015, description="Trailing stop activation profit percentage")
     INITIAL_DEPOSIT: float = Field(0.0, description="Initial deposit for drawdown tracking (set to 0.0 for auto-initialization from current balance)")

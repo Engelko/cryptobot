@@ -11,6 +11,7 @@ from antigravity.config import settings
 from antigravity.logging import get_logger
 from antigravity.auth import Authentication
 from antigravity.exceptions import APIError, AntigravityError
+from antigravity.utils import safe_float
 
 logger = get_logger("bybit_client")
 
@@ -42,7 +43,7 @@ class BybitClient:
         retry=retry_if_exception_type(aiohttp.ClientError),
         reraise=True
     )
-    async def _request(self, method: str, endpoint: str, payload: Dict[str, Any] = None, suppress_error_log: bool = False) -> Any:
+    async def _request(self, method: str, endpoint: str, payload: Dict[str, Any] = None, suppress_error_log: bool = False, ignorable_ret_codes: List[int] = None) -> Any:
         # Rate Limiting: Simple sleep to prevent bursting.
         # Ideally this should be a token bucket.
         await asyncio.sleep(0.05)
@@ -76,10 +77,11 @@ class BybitClient:
                 except json.JSONDecodeError:
                     raise APIError(f"Invalid JSON: {text}", -1, response.status)
                 
-                if data.get("retCode") != 0:
-                     if not suppress_error_log:
-                        logger.error("api_error", ret_code=data.get("retCode"), ret_msg=data.get("retMsg"))
-                     raise APIError(data.get("retMsg"), data.get("retCode"), response.status)
+                ret_code = data.get("retCode")
+                if ret_code != 0:
+                    if not suppress_error_log and (not ignorable_ret_codes or ret_code not in ignorable_ret_codes):
+                        logger.error("api_error", ret_code=ret_code, ret_msg=data.get("retMsg"))
+                    raise APIError(data.get("retMsg"), ret_code, response.status)
                 
                 return data.get("result")
         except aiohttp.ClientError as e:
@@ -171,6 +173,15 @@ class BybitClient:
         except Exception as e:
             logger.debug(f"Contract balance fetch failed: {e}")
 
+        # 3. Try SPOT (Standard Account)
+        try:
+            params = {"accountType": "SPOT", "coin": coin}
+            res = await self._request("GET", endpoint, params, suppress_error_log=True)
+            if res and "list" in res and len(res["list"]) > 0:
+                 return res["list"][0]
+        except Exception as e:
+            logger.debug(f"Spot balance fetch failed: {e}")
+
         return {}
 
     async def get_positions(self, category: str = "linear", symbol: str = None) -> List[Dict]:
@@ -229,12 +240,7 @@ class BybitClient:
         endpoint = "/v5/position/set-leverage"
 
         # Convert to float for proper numeric format
-        try:
-            # Default to 1.0 (safe fallback) if empty
-            leverage_num = float(leverage) if leverage else 1.0
-        except (ValueError, TypeError):
-            logger.error("invalid_leverage_format", symbol=symbol, leverage=leverage)
-            return False
+        leverage_num = safe_float(leverage, default=1.0)
 
         # Format leverage string (remove trailing .0 for integers)
         if leverage_num.is_integer():
@@ -253,7 +259,8 @@ class BybitClient:
         try:
             logger.info("set_leverage_attempt", symbol=symbol, leverage=leverage_str, payload=payload)
             # _request raises APIError if retCode != 0
-            res = await self._request("POST", endpoint, payload)
+            # Ignore 110043 (Leverage not modified) in the main request logger
+            res = await self._request("POST", endpoint, payload, ignorable_ret_codes=[110043])
 
             logger.info("set_leverage_success", symbol=symbol, leverage=leverage_str)
             return True
@@ -274,7 +281,7 @@ class BybitClient:
                 payload["sellLeverage"] = fallback_leverage
 
                 try:
-                    await self._request("POST", endpoint, payload)
+                    await self._request("POST", endpoint, payload, ignorable_ret_codes=[110043])
                     logger.info("set_leverage_fallback_success", symbol=symbol, leverage=fallback_leverage)
                     return True
                 except APIError as e2:
