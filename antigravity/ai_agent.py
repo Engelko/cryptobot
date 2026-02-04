@@ -86,7 +86,8 @@ class AIAgent:
         df['dc_m'] = donchian.donchian_channel_mband()
 
         # 4. Others
-        df['psar'] = ta.trend.psar_up(df['high'], df['low'], df['close'])
+        psar = ta.trend.PSARIndicator(df['high'], df['low'], df['close'])
+        df['psar'] = psar.psar()
         df['aroon_up'] = ta.trend.aroon_up(df['high'], df['low'])
         df['aroon_down'] = ta.trend.aroon_down(df['high'], df['low'])
 

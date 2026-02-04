@@ -430,7 +430,7 @@ with col_main:
                 return f'color: {color}'
 
             st.dataframe(
-                df_pos.style.format({"SL Distance": "{:.2%}"}).applymap(color_sl_dist, subset=['SL Distance']),
+                df_pos.style.format({"SL Distance": "{:.2%}"}).map(color_sl_dist, subset=['SL Distance']),
                 use_container_width=True
             )
         else:

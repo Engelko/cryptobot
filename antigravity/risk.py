@@ -337,15 +337,31 @@ class RiskManager:
 
         client = BybitClient()
         try:
-            positions = await client.get_positions(category="linear", symbol=signal.symbol)
-            for p in positions:
-                size = float(p.get("size", 0))
-                side = p.get("side")
-                if size > 0:
-                    if side == "Buy" and signal.type == SignalType.SELL: return True
-                    if side == "Sell" and signal.type == SignalType.BUY: return True
-        except Exception:
-            pass
+            category = getattr(signal, 'category', 'linear')
+            if category == 'spot':
+                # For spot, check if we have balance of the base coin
+                coin = signal.symbol.replace("USDT", "")
+                balance_data = await client.get_wallet_balance(coin=coin)
+
+                coin_qty = 0.0
+                if "coin" in balance_data:
+                    for c in balance_data["coin"]:
+                        if c.get("coin") == coin:
+                            coin_qty = float(c.get("walletBalance", 0))
+                            break
+
+                if coin_qty > 0 and signal.type == SignalType.SELL:
+                    return True
+            else:
+                positions = await client.get_positions(category="linear", symbol=signal.symbol)
+                for p in positions:
+                    size = float(p.get("size", 0))
+                    side = p.get("side")
+                    if size > 0:
+                        if side == "Buy" and signal.type == SignalType.SELL: return True
+                        if side == "Sell" and signal.type == SignalType.BUY: return True
+        except Exception as e:
+            logger.error("reduce_only_check_error", error=str(e))
         finally:
             await client.close()
         return False
