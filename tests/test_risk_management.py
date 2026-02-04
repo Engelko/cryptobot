@@ -31,8 +31,9 @@ class TestNewRisk(unittest.TestCase):
         rm._is_reduce_only = AsyncMock(return_value=False)
         rm._close_all_positions = AsyncMock()
 
-        allowed = self.loop.run_until_complete(rm.check_signal(signal))
+        allowed, reason = self.loop.run_until_complete(rm.check_signal(signal))
         self.assertFalse(allowed)
+        self.assertIn("EMERGENCY_STOP", reason)
         self.assertEqual(rm.trading_mode, TradingMode.EMERGENCY_STOP)
 
     @patch('antigravity.database.db.get_risk_state', return_value=None)
@@ -45,7 +46,7 @@ class TestNewRisk(unittest.TestCase):
 
         signal = Signal(symbol="BTCUSDT", type=SignalType.BUY, price=50000.0, leverage=10.0)
 
-        allowed = self.loop.run_until_complete(rm.check_signal(signal))
+        allowed, reason = self.loop.run_until_complete(rm.check_signal(signal))
         self.assertTrue(allowed)
         self.assertEqual(signal.leverage, 3.0) # Capped
 
@@ -60,7 +61,7 @@ class TestNewRisk(unittest.TestCase):
 
         signal = Signal(symbol="BTCUSDT", type=SignalType.BUY, price=50000.0)
 
-        allowed = self.loop.run_until_complete(rm.check_signal(signal))
+        allowed, reason = self.loop.run_until_complete(rm.check_signal(signal))
         self.assertTrue(allowed)
         self.assertEqual(rm.trading_mode, TradingMode.RECOVERY)
         self.assertEqual(signal.category, "spot")

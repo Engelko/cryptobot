@@ -5,7 +5,7 @@ from antigravity.event import event_bus, MarketDataEvent, KlineEvent, OrderUpdat
 from antigravity.strategy import AbstractStrategy, Signal, SignalType
 from antigravity.risk import RiskManager
 from antigravity.database import db
-from antigravity.execution import execution_manager
+from antigravity.execution import execution_manager, ExecutionRejection
 from antigravity.ml_engine import ml_engine
 from antigravity.client import BybitClient
 from antigravity.regime_detector import market_regime_detector
@@ -284,25 +284,36 @@ class StrategyEngine:
             return
 
         # 3. Risk Check
-        if not await self.risk_manager.check_signal(signal):
+        passed, risk_reason = await self.risk_manager.check_signal(signal)
+        if not passed:
             logger.warning("signal_rejected_by_risk", strategy=strategy_name, symbol=signal.symbol, 
-                         leverage=signal.leverage, risk_percentage=signal.risk_percentage)
+                         reason=risk_reason)
             # Save rejected signal to DB for visibility in Dashboard
             db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price,
-                           f"[REJECTED: Risk Limit] {signal.reason}")
+                           f"[REJECTED: Risk Limit] {risk_reason}")
             return
 
-        logger.info("signal_accepted", 
-                    strategy=strategy_name, 
-                    type=signal.type.value, 
-                    symbol=signal.symbol, 
-                    price=signal.price)
-        
-        # 2. Persist Signal
-        db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price, signal.reason)
+        # 4. Execute Signal
+        try:
+            await execution_manager.execute(signal, strategy_name)
 
-        # 3. Execute Signal
-        await execution_manager.execute(signal, strategy_name)
+            # Persist Signal as Accepted only after successful execution
+            logger.info("signal_accepted",
+                        strategy=strategy_name,
+                        type=signal.type.value,
+                        symbol=signal.symbol,
+                        price=signal.price)
+            db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price, f"[ACCEPTED] {signal.reason}")
+
+        except ExecutionRejection as e:
+            # Business-level rejection (spread, funds, etc.)
+            logger.warning("signal_rejected_during_execution", strategy=strategy_name, symbol=signal.symbol, reason=str(e))
+            db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price, f"[REJECTED: Execution] {str(e)}")
+        except Exception as e:
+            # Unexpected technical error
+            logger.error("signal_execution_error", strategy=strategy_name, symbol=signal.symbol, error=str(e))
+            db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price, f"[EXECUTION ERROR] {str(e)}")
+            # We don't re-raise here to prevent engine crash
 
 # Global Engine Instance
 strategy_engine = StrategyEngine()
