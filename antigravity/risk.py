@@ -280,9 +280,18 @@ class RiskManager:
             signal.leverage = leverage
 
         daily_loss_left = max(0, settings.MAX_DAILY_LOSS - self.current_daily_loss)
-        size_by_pct = balance * 0.02
+
+        # Use risk percentage from signal if provided, otherwise default to 2%
+        risk_per_trade = getattr(signal, 'risk_percentage', 0.02)
+        if risk_per_trade is None or risk_per_trade <= 0:
+            risk_per_trade = 0.02
+
+        size_by_pct = balance * risk_per_trade
         size_by_abs = settings.MAX_POSITION_SIZE
-        risk_size = (balance * daily_loss_left) / (settings.STOP_LOSS_PCT * leverage) if leverage > 0 else size_by_abs
+
+        # Calculate size based on remaining daily loss budget
+        # Formula: Position Size = Max Loss / Stop Loss Percentage
+        risk_size = daily_loss_left / settings.STOP_LOSS_PCT if settings.STOP_LOSS_PCT > 0 else size_by_abs
 
         target_size = min(size_by_pct, size_by_abs, risk_size)
 
