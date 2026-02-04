@@ -169,7 +169,8 @@ class OnchainAnalyzer:
     # ============================================================================
 
     async def _get_messari_netflow(self, session: aiohttp.ClientSession) -> float:
-        url = "https://data.messari.io/api/v1/assets/bitcoin/metrics/exchange-flows/statistics"
+        # Use a more stable endpoint that returns multiple metrics
+        url = "https://data.messari.io/api/v1/assets/bitcoin/metrics"
         headers = {"x-messari-api-key": self.messari_api_key}
 
         async with session.get(url, headers=headers, timeout=15) as resp:
@@ -177,11 +178,25 @@ class OnchainAnalyzer:
                 self.backoff_multiplier *= 1.5
                 raise Exception("Messari Rate Limit (429)")
             if resp.status != 200:
-                logger.warning("messari_netflow_error", status=resp.status)
+                logger.warning("messari_metrics_error", status=resp.status)
                 return 0.0
 
             data = await resp.json()
-            return data.get('data', {}).get('net_flow', 0.0)
+            # Try to find netflow in the response
+            # Messari v1 metrics response structure: data -> market_data or data -> on_chain_data
+            try:
+                metrics = data.get('data', {}).get('all_metrics', [])
+                # If it's a list of metrics, we look for exchange net flow
+                for m in metrics:
+                    if m.get('name') == 'Exchange Net Flow':
+                        return float(m.get('values', [{}])[0].get('value', 0.0))
+
+                # Fallback: check specific fields if available
+                market_data = data.get('data', {}).get('market_data', {})
+                # Some versions might have it here
+                return float(market_data.get('exchange_net_flow', 0.0))
+            except (TypeError, ValueError, IndexError):
+                return 0.0
 
     async def _get_fear_greed_index(self, session: aiohttp.ClientSession) -> int:
         url = "https://api.alternative.me/fng/?limit=1"
