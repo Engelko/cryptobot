@@ -110,6 +110,47 @@ def get_trading_mode(equity_ratio: float, consecutive_losses: int) -> str:
         return "RECOVERY"
     return "NORMAL"
 
+# ===== CONFIG PERSISTENCE =====
+def save_yaml_config(new_config):
+    try:
+        with open("strategies.yaml", "w") as f:
+            yaml.dump(new_config, f, default_flow_style=False)
+        return True
+    except Exception as e:
+        st.error(f"Failed to save strategies.yaml: {e}")
+        return False
+
+def update_env_file(updates: Dict[str, Any]):
+    try:
+        env_path = ".env"
+        lines = []
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                lines = f.readlines()
+
+        # Parse existing keys
+        env_dict = {}
+        for line in lines:
+            if "=" in line and not line.startswith("#"):
+                key, val = line.split("=", 1)
+                env_dict[key.strip()] = val.strip()
+
+        # Apply updates
+        for k, v in updates.items():
+            if isinstance(v, list):
+                env_dict[k] = json.dumps(v)
+            else:
+                env_dict[k] = str(v)
+
+        # Write back
+        with open(env_path, "w") as f:
+            for k, v in env_dict.items():
+                f.write(f"{k}={v}\n")
+        return True
+    except Exception as e:
+        st.error(f"Failed to update .env: {e}")
+        return False
+
 # ===== DATA FETCHING =====
 bybit_results = run_async(fetch_bybit_data())
 balance_raw = bybit_results[0] if not isinstance(bybit_results[0], Exception) else {}
@@ -640,16 +681,79 @@ with col_main:
 
     # ===== TAB 5: SETTINGS & SYSTEM =====
     with tabs[4]:
-        st.subheader("System Configuration")
+        st.subheader("Global System Configuration")
+
+        # Load current YAML for editing
+        try:
+            with open("strategies.yaml", "r") as f:
+                current_yaml = yaml.safe_load(f)
+        except Exception:
+            current_yaml = {"strategies": {}}
+
         with st.form("settings_form"):
+            st.markdown("#### 🌍 General Limits (.env)")
             c1, c2 = st.columns(2)
             new_symbols = c1.text_area("Trading Symbols (JSON list)", value=json.dumps(settings.TRADING_SYMBOLS))
-            new_leverage = c2.number_input("Max Leverage", value=settings.MAX_LEVERAGE, step=0.5)
-            new_daily_loss = c1.number_input("Max Daily Loss ($)", value=settings.MAX_DAILY_LOSS)
-            new_pos_size = c2.number_input("Max Position Size ($)", value=settings.MAX_POSITION_SIZE)
+            new_leverage = c2.number_input("Max Leverage (Global Cap)", value=settings.MAX_LEVERAGE, min_value=1.0, max_value=20.0, step=0.5)
+            new_daily_loss = c1.number_input("Max Daily Loss ($)", value=settings.MAX_DAILY_LOSS, min_value=1.0)
+            new_pos_size = c2.number_input("Max Position Size ($)", value=settings.MAX_POSITION_SIZE, min_value=1.0)
+            new_initial_deposit = c1.number_input("Initial Deposit ($) for Drawdown", value=settings.INITIAL_DEPOSIT)
 
-            if st.form_submit_button("Update Config & Restart"):
-                st.warning("Feature pending: Config persistence logic.")
+            st.divider()
+            st.markdown("#### 🎯 Strategy Risk Settings (strategies.yaml)")
+
+            # Create a column for each strategy's risk
+            strat_keys = ["trend_following", "mean_reversion", "volatility_breakout", "scalping", "bb_squeeze", "grid"]
+            new_risks = {}
+
+            # Split into two columns for better layout
+            sc1, sc2 = st.columns(2)
+            for i, key in enumerate(strat_keys):
+                target_col = sc1 if i % 2 == 0 else sc2
+
+                # Get current risk or default to 0.02
+                strat_data = current_yaml.get("strategies", {}).get(key, {})
+                current_risk = strat_data.get("risk_per_trade", 0.02)
+
+                label = f"{key.replace('_', ' ').title()} Risk (%)"
+                # Use percentage for easier UI (0.02 -> 2.0%)
+                new_risk_pct = target_col.slider(label, 0.1, 20.0, float(current_risk * 100.0), 0.1, help=f"Risk per trade for {key}")
+                new_risks[key] = new_risk_pct / 100.0
+
+            # Special case for DynamicRiskLeverage
+            drl_data = current_yaml.get("strategies", {}).get("dynamic_risk_leverage", {})
+            drl_max_risk = drl_data.get("max_risk_per_trade", 0.02)
+            drl_risk = sc1.slider("DynamicRiskLeverage Max Risk (%)", 0.1, 20.0, float(drl_max_risk * 100.0), 0.1)
+            new_risks["dynamic_risk_leverage"] = drl_risk / 100.0
+
+            st.divider()
+            submit_col1, submit_col2 = st.columns([1, 1])
+            if submit_col1.form_submit_button("💾 Save All Changes"):
+                # 1. Update YAML
+                for key, risk_val in new_risks.items():
+                    if key in current_yaml["strategies"]:
+                        if key == "dynamic_risk_leverage":
+                            current_yaml["strategies"][key]["max_risk_per_trade"] = risk_val
+                        else:
+                            current_yaml["strategies"][key]["risk_per_trade"] = risk_val
+
+                yaml_success = save_yaml_config(current_yaml)
+
+                # 2. Update .env
+                env_updates = {
+                    "TRADING_SYMBOLS": json.loads(new_symbols),
+                    "MAX_LEVERAGE": new_leverage,
+                    "MAX_DAILY_LOSS": new_daily_loss,
+                    "MAX_POSITION_SIZE": new_pos_size,
+                    "INITIAL_DEPOSIT": new_initial_deposit
+                }
+                env_success = update_env_file(env_updates)
+
+                if yaml_success and env_success:
+                    st.success("✅ Configuration saved! Please restart the bot to apply changes.")
+                    st.balloons()
+                else:
+                    st.error("❌ Some changes could not be saved.")
 
         st.divider()
         st.subheader("Diagnostics")
