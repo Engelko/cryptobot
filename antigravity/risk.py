@@ -185,6 +185,7 @@ class RiskManager:
     async def get_equity(self) -> float:
         balance = await self._get_balance()
         unrealized_pnl = 0.0
+        logger.debug("calculating_equity", balance=balance)
         if not settings.SIMULATION_MODE:
             client = BybitClient()
             try:
@@ -211,8 +212,8 @@ class RiskManager:
                 for c in balance_data["coin"]:
                     if c.get("coin") == "USDT":
                         return float(c.get("walletBalance", 0.0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("balance_fetch_failed", error=str(e))
         finally:
             await client.close()
         return 0.0
@@ -239,7 +240,12 @@ class RiskManager:
             self.trading_mode = TradingMode.NORMAL
 
         self._last_mode_check = now
-        logger.info("trading_mode_check", equity=equity, ratio=f"{equity_ratio:.2%}", mode=self.trading_mode.value)
+        logger.info("trading_mode_check",
+                    equity=round(equity, 2),
+                    initial_deposit=self.initial_deposit,
+                    ratio=f"{equity_ratio:.2%}",
+                    mode=self.trading_mode.value,
+                    consecutive_losses=self.consecutive_loss_days)
 
     async def check_signal(self, signal: Signal) -> bool:
         self._check_reset()

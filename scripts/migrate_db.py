@@ -1,14 +1,26 @@
 import sqlite3
 import os
-from antigravity.config import settings
+import re
+
+def get_db_path():
+    # Try to read from .env directly to avoid package import issues
+    db_url = "sqlite:///storage/data.db" # Default
+    if os.path.exists(".env"):
+        with open(".env", "r") as f:
+            content = f.read()
+            match = re.search(r'DATABASE_URL\s*=\s*["\']?(.*?)["\']?(\s|$)', content)
+            if match:
+                db_url = match.group(1)
+
+    return db_url.replace("sqlite:///", "")
 
 def migrate():
-    db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+    db_path = get_db_path()
+    print(f"Targeting database: {db_path}")
+
     if not os.path.exists(db_path):
         print(f"Database {db_path} does not exist. Creating it...")
-        # Just create the directory if it doesn't exist
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        # We can let the app initialize it, or just create empty file
         open(db_path, 'a').close()
 
     conn = sqlite3.connect(db_path)
@@ -18,7 +30,7 @@ def migrate():
         # Check if table exists
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='risk_state'")
         if not cursor.fetchone():
-            print("Table risk_state does not exist yet. It will be created by the app.")
+            print("Table risk_state does not exist yet. Bot will create it on first run.")
             return
 
         # Check if column exists
