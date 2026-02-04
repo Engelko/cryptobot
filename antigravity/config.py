@@ -60,6 +60,7 @@ class Settings(BaseSettings):
 
     # On-chain Analysis
     COINGECKO_API_KEY: str = Field(default="", description="CoinGecko API Key (Demo/Pro)")
+    COINGECKO_PRO: bool = Field(default=False, description="Set to True if using CoinGecko Pro API")
     MESSARI_API_KEY: str = Field(default="", description="Messari API Key")
 
     def model_post_init(self, __context):

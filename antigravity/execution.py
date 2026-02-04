@@ -227,11 +227,14 @@ class RealBroker:
             log.info("real_execution_start", symbol=signal.symbol, available_balance=available_balance)
 
             # Check for existing position to determine intent (Open vs Close)
-            try:
-                positions = await client.get_positions(category=category, symbol=signal.symbol)
-            except Exception as e:
-                log.error("real_execution_abort_api_error", error=f"Failed to fetch positions: {str(e)}")
-                return
+            # Bybit V5: get_positions only supports linear or option. Spot uses wallet balance.
+            positions = []
+            if category != "spot":
+                try:
+                    positions = await client.get_positions(category=category, symbol=signal.symbol)
+                except Exception as e:
+                    log.error("real_execution_abort_api_error", error=f"Failed to fetch positions: {str(e)}")
+                    return
 
             long_pos = None
             short_pos = None
@@ -411,6 +414,23 @@ class RealBroker:
                     )
                     if res and "orderId" in res:
                         log.info("spot_sell_filled", order_id=res["orderId"])
+                        # Calculate PnL for Spot
+                        net_pnl = 0.0
+                        exit_p = signal.price or 0.0
+                        qty_f = float(qty_str)
+
+                        last_buy = db.get_last_trade(signal.symbol, "BUY")
+                        if last_buy:
+                            entry = last_buy["price"]
+                            gross_pnl = (exit_p - entry) * qty_f
+                            # Approx fees
+                            fees = FeeConfig.estimate_fee(qty_f, entry, "spot") + FeeConfig.estimate_fee(qty_f, exit_p, "spot")
+                            net_pnl = gross_pnl - fees
+                            log.info("spot_pnl_calc", gross_pnl=gross_pnl, fees=fees, net_pnl=net_pnl)
+
+                        db.save_trade(signal.symbol, "SELL", exit_p, qty_f, 0.0, strategy_name, exec_type="REAL", pnl=net_pnl)
+                        await event_bus.publish(TradeClosedEvent(symbol=signal.symbol, pnl=net_pnl, strategy=strategy_name, execution_type="REAL"))
+
                     return
 
                 if long_pos:

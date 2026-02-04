@@ -27,6 +27,20 @@ class OnchainAnalyzer:
         self.coingecko_api_key = getattr(settings, "COINGECKO_API_KEY", "")
         self.messari_api_key = getattr(settings, "MESSARI_API_KEY", "")
 
+        # CoinGecko API Configuration
+        # Default to Demo API. If key starts with CG- and COINGECKO_PRO=True, use Pro.
+        self.cg_is_pro = getattr(settings, "COINGECKO_PRO", False)
+        if self.coingecko_api_key.startswith("CG-"):
+            if self.cg_is_pro:
+                self.cg_base_url = "https://pro-api.coingecko.com/api/v3"
+                self.cg_header = "x-cg-pro-api-key"
+            else:
+                self.cg_base_url = "https://api.coingecko.com/api/v3"
+                self.cg_header = "x-cg-demo-api-key"
+        else:
+            self.cg_base_url = "https://api.coingecko.com/api/v3"
+            self.cg_header = None
+
         # Cache management
         self._score_cache = {"value": 0.5, "timestamp": 0, "netflow": 0.0, "fear_greed": 50}
         self._whale_cache = {"safe": True, "timestamp": 0}
@@ -176,7 +190,11 @@ class OnchainAnalyzer:
         async with session.get(url, headers=headers, timeout=15) as resp:
             if resp.status == 429:
                 self.backoff_multiplier *= 1.5
+                logger.error("messari_rate_limit", status=429, backoff=self.backoff_multiplier)
                 raise Exception("Messari Rate Limit (429)")
+            if resp.status == 401:
+                logger.error("messari_auth_error", status=401, message="Invalid Messari API Key")
+                return 0.0
             if resp.status != 200:
                 logger.warning("messari_metrics_error", status=resp.status)
                 return 0.0
@@ -235,17 +253,27 @@ class OnchainAnalyzer:
         return max(0.0, min(1.0, score))
 
     async def _detect_volume_spike(self, session: aiohttp.ClientSession, coin_id: str) -> bool:
-        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+        url = f"{self.cg_base_url}/coins/{coin_id}/market_chart"
         params = {
             "vs_currency": "usd",
             "days": "1",
             "interval": "hourly"
         }
-        headers = {"x-cg-demo-api-key": self.coingecko_api_key}
+
+        headers = {}
+        if self.cg_header and self.coingecko_api_key:
+            headers[self.cg_header] = self.coingecko_api_key
+        elif self.coingecko_api_key:
+            # Fallback for old style keys or if header not determined
+            params["api_key"] = self.coingecko_api_key
 
         async with session.get(url, headers=headers, params=params, timeout=15) as resp:
             if resp.status == 429:
+                logger.error("coingecko_rate_limit", status=429, coin=coin_id)
                 raise Exception(f"CoinGecko Rate Limit (429) for {coin_id}")
+            if resp.status == 401:
+                logger.error("coingecko_auth_error", status=401, coin=coin_id, message="Invalid CoinGecko API Key")
+                return False
             if resp.status != 200:
                 logger.warning("coingecko_volume_error", status=resp.status, coin=coin_id)
                 return False

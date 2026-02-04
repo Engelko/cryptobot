@@ -122,6 +122,23 @@ class Database:
         finally:
             session.close()
 
+    def get_last_trade(self, symbol: str, side: str = "BUY"):
+        session = self.Session()
+        try:
+            trade = session.query(DBTrade).filter_by(symbol=symbol, side=side).order_by(DBTrade.created_at.desc()).first()
+            if trade:
+                return {
+                    "price": trade.price,
+                    "quantity": trade.quantity,
+                    "created_at": trade.created_at
+                }
+            return None
+        except Exception as e:
+            logger.error("db_get_last_trade_failed", error=str(e), symbol=symbol)
+            return None
+        finally:
+            session.close()
+
     def get_recent_trades(self, strategy: str = None, limit: int = 20):
         session = self.Session()
         try:
