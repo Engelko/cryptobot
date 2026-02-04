@@ -514,36 +514,27 @@ with col_main:
                 st.info("AI Model file not found in storage/ai_model.joblib or incompatible format.")
 
             st.markdown("#### On-chain Indicators")
-            if not settings.MESSARI_API_KEY or not settings.COINGECKO_API_KEY:
-                st.info("💡 **On-chain data missing.**")
-                if not settings.MESSARI_API_KEY:
-                    st.write("- Set `MESSARI_API_KEY` in `.env` for Exchange Flows.")
-                if not settings.COINGECKO_API_KEY:
-                    st.write("- Set `COINGECKO_API_KEY` in `.env` for Volume Spike Detection.")
-            else:
-                # Real on-chain data fetch
-                o_c1, o_c2 = st.columns(2)
-                netflow = onchain_analyzer.get_netflow()
-                fear_greed = onchain_analyzer.get_fear_greed()
+            # Real on-chain data fetch
+            o_c1, o_c2 = st.columns(2)
+            netflow = onchain_analyzer.get_netflow()
+            fear_greed = onchain_analyzer.get_fear_greed()
 
-                nf_delta = "Outflow (Bullish)" if netflow < 0 else "Inflow (Bearish)"
-                fg_delta = "Fear (Bullish)" if fear_greed < 40 else "Greed (Bearish)" if fear_greed > 70 else "Neutral"
+            nf_delta = "Disabled"
+            fg_delta = "Fear (Bullish)" if fear_greed < 40 else "Greed (Bearish)" if fear_greed > 70 else "Neutral"
 
-                o_c1.metric("Exchange Netflow", f"{netflow:.1f} BTC", delta=nf_delta, delta_color="normal" if netflow < 0 else "inverse")
-                o_c2.metric("Fear & Greed Index", f"{fear_greed}", delta=fg_delta, delta_color="normal" if fear_greed < 40 else "inverse")
+            o_c1.metric("Exchange Netflow", "OFF", delta=nf_delta)
+            o_c2.metric("Fear & Greed Index", f"{fear_greed}", delta=fg_delta, delta_color="normal" if fear_greed < 40 else "inverse")
 
-                st.progress(onchain_analyzer.get_score(), text=f"Sentiment Score: {onchain_analyzer.get_score():.2f}")
+            st.progress(onchain_analyzer.get_score(), text=f"Sentiment Score: {onchain_analyzer.get_score():.2f}")
+            st.caption("Note: Messari is currently disabled due to regional restrictions.")
 
             st.markdown("#### Whale Alerts Feed")
-            if not settings.COINGECKO_API_KEY:
-                 st.caption("CoinGecko API key required in .env for Volume Spike detection.")
+            whale_safe = onchain_analyzer.is_whale_safe()
+            if not whale_safe:
+                st.error("🐋 **Whale Activity Detected!** Trading paused.")
             else:
-                 whale_safe = onchain_analyzer.is_whale_safe()
-                 if not whale_safe:
-                     st.error("🐋 **Whale Activity Detected!** Trading paused.")
-                 else:
-                     st.success("🐋 **Whale activity within normal range.**")
-                 st.info("Using Volume Spike detection via CoinGecko")
+                st.success("🐋 **Whale activity within normal range.**")
+            st.info("Using Volume Spike detection via CoinGecko (Public API)")
 
         st.markdown("#### Strategy Performance Heatmap")
         try:
