@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     MAX_LEVERAGE: float = Field(3.0, gt=0, description="Max leverage")
     STOP_LOSS_PCT: float = Field(0.02, description="Hard stop loss percentage")
     TRAILING_STOP_TRIGGER: float = Field(0.015, description="Trailing stop activation profit percentage")
-    INITIAL_DEPOSIT: float = Field(186.0, description="Initial deposit for drawdown tracking")
+    INITIAL_DEPOSIT: float = Field(0.0, description="Initial deposit for drawdown tracking (set to 0.0 for auto-initialization from current balance)")
     RECOVERY_THRESHOLD: float = Field(0.70, description="Equity % to enter recovery mode")
     EMERGENCY_THRESHOLD: float = Field(0.50, description="Equity % for emergency stop")
 
@@ -76,6 +76,10 @@ class Settings(BaseSettings):
                 self.ACTIVE_STRATEGIES = json.loads(self.ACTIVE_STRATEGIES)
             except:
                 self.ACTIVE_STRATEGIES = [s.strip() for s in self.ACTIVE_STRATEGIES.split(",")]
+
+        # Fallback for INITIAL_DEPOSIT from INITIAL_CAPITAL if not explicitly set
+        if self.INITIAL_DEPOSIT == 0.0 and self.INITIAL_CAPITAL != 10000.0:
+            self.INITIAL_DEPOSIT = self.INITIAL_CAPITAL
 
 # Global Settings Instance
 settings = Settings()
