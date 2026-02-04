@@ -110,6 +110,27 @@ def get_trading_mode(equity_ratio: float, consecutive_losses: int) -> str:
         return "RECOVERY"
     return "NORMAL"
 
+def get_recommendation(reason: str) -> str:
+    if "[REJECTED: Risk Limit]" in reason:
+        if "daily_loss_limit_exceeded" in reason:
+            return "Wait for daily reset or increase MAX_DAILY_LOSS."
+        if "insufficient_funds" in reason:
+            return "Check wallet balance or decrease MAX_POSITION_SIZE."
+        return "Verify risk settings and available margin."
+    if "[REJECTED: AI" in reason:
+        return "AI confidence too low. No action required, wait for better signals."
+    if "[REJECTED: Market Regime]" in reason:
+        return "Market regime unsuitable for this strategy. Consider enabling other strategies."
+    if "[REJECTED: Whale Activity]" in reason:
+        return "Market unstable due to whale activity. Trading paused for safety."
+    if "spread_too_high" in reason:
+        return "Low liquidity. Try increasing MAX_SPREAD if you accept higher slippage."
+    if "10029" in reason:
+        return "Symbol not whitelisted. Check if it's available for Spot instead of Futures."
+    if "accepted" in reason.lower() or "filled" in reason.lower():
+        return "Signal executed successfully."
+    return "Check system logs for more details."
+
 # ===== CONFIG PERSISTENCE =====
 def save_yaml_config(new_config):
     try:
@@ -317,11 +338,12 @@ with col_gauge:
         "Max Daily Loss": f"${settings.MAX_DAILY_LOSS}",
         "Max Pos Size": f"${settings.MAX_POSITION_SIZE}",
         "Max Leverage": f"{settings.MAX_LEVERAGE}x",
+        "Max Spread": f"{settings.MAX_SPREAD*100}%",
         "Stop Loss": f"{settings.STOP_LOSS_PCT*100}%"
     })
 
 with col_main:
-    tabs = st.tabs(["🎯 Risk", "🤖 AI & Strategies", "📊 Market", "💼 Portfolio", "⚙️ Settings"])
+    tabs = st.tabs(["🎯 Risk", "🤖 AI & Strategies", "📊 Market", "💼 Portfolio", "📜 Logs", "⚙️ Settings"])
 
     # ===== TAB 1: RISK MANAGEMENT =====
     with tabs[0]:
@@ -679,8 +701,57 @@ with col_main:
         except Exception:
             pass
 
-    # ===== TAB 5: SETTINGS & SYSTEM =====
+    # ===== TAB 5: LOGS & SIGNALS =====
     with tabs[4]:
+        st.markdown("#### 📜 Signal Execution & Audit Logs")
+        st.caption("Detailed breakdown of accepted and rejected trading signals with recommendations.")
+
+        try:
+            # Fetch last 100 signals
+            df_logs = pd.read_sql("SELECT created_at, strategy, symbol, type, price, reason FROM signals ORDER BY created_at DESC LIMIT 100", engine)
+
+            if df_logs.empty:
+                st.info("No signals logged yet.")
+            else:
+                # Add recommendation column
+                df_logs['recommendation'] = df_logs['reason'].apply(get_recommendation)
+
+                # Formatter for status icon
+                def format_status(reason):
+                    if "[REJECTED" in reason: return "🚨 REJECTED"
+                    if "accepted" in reason.lower(): return "✅ ACCEPTED"
+                    return "⚠️ WARNING"
+
+                df_logs['status'] = df_logs['reason'].apply(format_status)
+
+                # Reorder columns for better UI
+                display_df = df_logs[['created_at', 'strategy', 'symbol', 'status', 'reason', 'recommendation']]
+
+                # Styling
+                def style_status(val):
+                    color = '#FAFAFA'
+                    if 'REJECTED' in val: color = '#EF4444'
+                    elif 'ACCEPTED' in val: color = '#10B981'
+                    return f'color: {color}; font-weight: bold'
+
+                st.dataframe(
+                    display_df.style.map(style_status, subset=['status']),
+                    use_container_width=True,
+                    height=600
+                )
+
+                if st.button("🗑️ Clear Signal Logs"):
+                    with engine.connect() as conn:
+                        conn.execute(text("DELETE FROM signals"))
+                        conn.commit()
+                    st.success("Signal logs cleared!")
+                    st.rerun()
+
+        except Exception as e:
+            st.error(f"Error loading signal logs: {e}")
+
+    # ===== TAB 6: SETTINGS & SYSTEM =====
+    with tabs[5]:
         st.subheader("Global System Configuration")
 
         # Load current YAML for editing
@@ -697,7 +768,8 @@ with col_main:
             new_leverage = c2.number_input("Max Leverage (Global Cap)", value=settings.MAX_LEVERAGE, min_value=1.0, max_value=20.0, step=0.5)
             new_daily_loss = c1.number_input("Max Daily Loss ($)", value=settings.MAX_DAILY_LOSS, min_value=1.0)
             new_pos_size = c2.number_input("Max Position Size ($)", value=settings.MAX_POSITION_SIZE, min_value=1.0)
-            new_initial_deposit = c1.number_input("Initial Deposit ($) for Drawdown", value=settings.INITIAL_DEPOSIT)
+            new_max_spread = c1.number_input("Max Allowed Spread (%)", value=float(settings.MAX_SPREAD * 100.0), min_value=0.01, max_value=5.0, step=0.01)
+            new_initial_deposit = c2.number_input("Initial Deposit ($) for Drawdown", value=settings.INITIAL_DEPOSIT)
 
             st.divider()
             st.markdown("#### 🎯 Strategy Risk Settings (strategies.yaml)")
@@ -745,6 +817,7 @@ with col_main:
                     "MAX_LEVERAGE": new_leverage,
                     "MAX_DAILY_LOSS": new_daily_loss,
                     "MAX_POSITION_SIZE": new_pos_size,
+                    "MAX_SPREAD": new_max_spread / 100.0,
                     "INITIAL_DEPOSIT": new_initial_deposit
                 }
                 env_success = update_env_file(env_updates)

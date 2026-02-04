@@ -9,6 +9,7 @@ from antigravity.regime_detector import MarketRegime, market_regime_detector
 from antigravity.logging import get_logger
 from antigravity.client import BybitClient
 from antigravity.database import db
+from antigravity.utils import safe_float
 from antigravity.event import event_bus, TradeClosedEvent, OrderUpdateEvent, KlineEvent, on_event
 from antigravity.metrics import metrics
 from antigravity.telegram_alerts import telegram_alerts
@@ -191,7 +192,7 @@ class RiskManager:
             try:
                 positions = await client.get_positions(category="linear")
                 for p in positions:
-                    unrealized_pnl += float(p.get("unrealisedPnl", 0))
+                    unrealized_pnl += safe_float(p.get("unrealisedPnl", 0))
             except Exception as e:
                 logger.error("equity_calc_error", error=str(e))
             finally:
@@ -207,11 +208,11 @@ class RiskManager:
         try:
             balance_data = await client.get_wallet_balance(coin="USDT")
             if "totalWalletBalance" in balance_data:
-                return float(balance_data.get("totalWalletBalance", 0.0))
+                return safe_float(balance_data.get("totalWalletBalance", 0.0))
             elif "coin" in balance_data:
                 for c in balance_data["coin"]:
                     if c.get("coin") == "USDT":
-                        return float(c.get("walletBalance", 0.0))
+                        return safe_float(c.get("walletBalance", 0.0))
         except Exception as e:
             logger.error("balance_fetch_failed", error=str(e))
         finally:
@@ -347,7 +348,7 @@ class RiskManager:
                 if "coin" in balance_data:
                     for c in balance_data["coin"]:
                         if c.get("coin") == coin:
-                            coin_qty = float(c.get("walletBalance", 0))
+                            coin_qty = safe_float(c.get("walletBalance", 0))
                             break
 
                 if coin_qty > 0 and signal.type == SignalType.SELL:
@@ -355,7 +356,7 @@ class RiskManager:
             else:
                 positions = await client.get_positions(category="linear", symbol=signal.symbol)
                 for p in positions:
-                    size = float(p.get("size", 0))
+                    size = safe_float(p.get("size", 0))
                     side = p.get("side")
                     if size > 0:
                         if side == "Buy" and signal.type == SignalType.SELL: return True

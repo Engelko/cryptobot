@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, List
 from antigravity.logging import get_logger
 from antigravity.config import settings
 from antigravity.telegram_alerts import telegram_alerts
+from antigravity.utils import safe_float
 
 logger = get_logger("onchain_analyzer")
 
@@ -207,12 +208,12 @@ class OnchainAnalyzer:
                 # If it's a list of metrics, we look for exchange net flow
                 for m in metrics:
                     if m.get('name') == 'Exchange Net Flow':
-                        return float(m.get('values', [{}])[0].get('value', 0.0))
+                        return safe_float(m.get('values', [{}])[0].get('value', 0.0))
 
                 # Fallback: check specific fields if available
                 market_data = data.get('data', {}).get('market_data', {})
                 # Some versions might have it here
-                return float(market_data.get('exchange_net_flow', 0.0))
+                return safe_float(market_data.get('exchange_net_flow', 0.0))
             except (TypeError, ValueError, IndexError):
                 return 0.0
 
