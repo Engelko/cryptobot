@@ -23,7 +23,7 @@ class TestRouter(unittest.TestCase):
         )
 
         # GoldenCross should be allowed in VOLATILE now
-        allowed = strategy_router.check_signal(signal, "GoldenCross", regime_data)
+        allowed, reason = strategy_router.check_signal(signal, "GoldenCross", regime_data)
         self.assertTrue(allowed, "GoldenCross should be allowed in VOLATILE regime")
         print("\n✓ Router allowed GoldenCross in VOLATILE regime")
 
@@ -45,7 +45,7 @@ class TestRouter(unittest.TestCase):
         )
 
         # General Linear check (now removed)
-        allowed = strategy_router.check_signal(signal, "AnyStrategy", regime_data)
+        allowed, reason = strategy_router.check_signal(signal, "AnyStrategy", regime_data)
         self.assertTrue(allowed, "Futures should not be globally blocked in VOLATILE anymore")
         print("✓ Router no longer globally blocks futures in VOLATILE")
 

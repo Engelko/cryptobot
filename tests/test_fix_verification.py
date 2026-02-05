@@ -44,7 +44,7 @@ class TestBotFixes(unittest.IsolatedAsyncioTestCase):
         )
 
         # Test
-        allowed = await risk_manager.check_signal(signal)
+        allowed, reason = await risk_manager.check_signal(signal)
 
         self.assertTrue(allowed)
         self.assertEqual(signal.category, "spot")

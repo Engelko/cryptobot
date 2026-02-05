@@ -140,6 +140,7 @@ class RiskManager:
 
         pos = self.active_positions[symbol]
         current_price = event.close
+        pos["last_price"] = current_price
         side = pos["side"]
 
         # Level 1: Hard Stop Loss (-2%)
@@ -394,12 +395,32 @@ class RiskManager:
     def _should_replace_position(self, new_signal: Signal, active_symbols: List[str]) -> tuple[bool, Optional[str]]:
         new_quality = self._get_quality_score(new_signal)
 
+        profits = []
         for symbol in active_symbols:
             pos = self.active_positions.get(symbol, {})
-            pos_quality = pos.get("quality_score", 2)
+            last_price = pos.get("last_price", pos.get("entry_price"))
+            side = pos.get("side")
+            entry_price = pos.get("entry_price", 1.0)
 
+            pnl_pct = (last_price - entry_price) / entry_price
+            if side == "Sell": pnl_pct = -pnl_pct
+            profits.append((symbol, pnl_pct, pos.get("quality_score", 2)))
+
+        # Rule: If both existing profitable > 2% -> Reject new signal (don't close winners)
+        if all(p[1] > 0.02 for p in profits):
+            return False, None
+
+        # Rule: If one losing > -1% (i.e. -2% < pnl < -1%) -> Replace the loser
+        # Wait, user said "одна убыточная > -1% → Закрыть убыточную".
+        # In Russian "> -1%" for loss usually means "worse than -1%", i.e. PnL < -0.01.
+        for symbol, pnl, quality in profits:
+            if pnl < -0.01:
+                return True, symbol
+
+        # Quality-based replacement
+        for symbol, pnl, quality in profits:
             # Type A (3) replaces Type C (1)
-            if new_quality >= 3 and pos_quality <= 1:
+            if new_quality >= 3 and quality <= 1:
                 return True, symbol
 
         return False, None

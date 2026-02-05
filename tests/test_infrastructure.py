@@ -32,21 +32,21 @@ class TestInfrastructure(unittest.TestCase):
         regime_trend = MarketRegimeData("BTC", MarketRegime.TRENDING_UP, 40, 1.0, 40, 0)
         signal = Signal(SignalType.BUY, "BTC", 100)
 
-        allowed = self.router.check_signal(signal, "GridMasterImproved", regime_trend)
+        allowed, reason = self.router.check_signal(signal, "GridMasterImproved", regime_trend)
         self.assertFalse(allowed, "Grid should be blocked in Trend")
 
         # 2. Grid in Range -> Allowed
         regime_range = MarketRegimeData("BTC", MarketRegime.RANGING, 10, 1.0, 10, 0)
-        allowed = self.router.check_signal(signal, "GridMasterImproved", regime_range)
+        allowed, reason = self.router.check_signal(signal, "GridMasterImproved", regime_range)
         self.assertTrue(allowed, "Grid should be allowed in Range")
 
         # 3. Trend in Trend -> Allowed
-        allowed = self.router.check_signal(signal, "TrendFollowing", regime_trend)
+        allowed, reason = self.router.check_signal(signal, "TrendFollowing", regime_trend)
         self.assertTrue(allowed, "Trend strategy should be allowed in Trend")
 
         # 4. Counter Trend -> Blocked
         signal_sell = Signal(SignalType.SELL, "BTC", 100)
-        allowed = self.router.check_signal(signal_sell, "TrendFollowing", regime_trend)
+        allowed, reason = self.router.check_signal(signal_sell, "TrendFollowing", regime_trend)
         self.assertFalse(allowed, "Counter-trend signal should be blocked")
 
 if __name__ == "__main__":
