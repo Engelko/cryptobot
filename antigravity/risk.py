@@ -2,7 +2,7 @@ import time
 import asyncio
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from antigravity.config import settings
 from antigravity.strategy import Signal, SignalType
 from antigravity.regime_detector import MarketRegime, market_regime_detector
@@ -24,6 +24,19 @@ class TradingMode(Enum):
     RECOVERY = "RECOVERY"  # Spot only, reduced size
     EMERGENCY_STOP = "EMERGENCY_STOP"  # Full stop
 
+CORRELATION_GROUPS = {
+    "high": [
+        ("BTCUSDT", "ETHUSDT"),
+        ("BTCUSDT", "BNBUSDT"),
+        ("ETHUSDT", "BNBUSDT"),
+        ("SOLUSDT", "ETHUSDT"),
+    ],
+    "medium": [
+        ("BTCUSDT", "SOLUSDT"),
+        ("ETHUSDT", "ADAUSDT"),
+    ]
+}
+
 class RiskManager:
     def __init__(self):
         self.initial_deposit = settings.INITIAL_DEPOSIT
@@ -35,6 +48,9 @@ class RiskManager:
 
         # Local position tracking for cascade stops
         self.active_positions: Dict[str, Dict[str, Any]] = {}
+        self.position_entry_time: Dict[str, float] = {}
+        self.trailing_activation_time: Dict[str, float] = {}
+        self.pending_quality: Dict[str, int] = {}
 
         # Load persisted state
         state = db.get_risk_state()
@@ -95,8 +111,10 @@ class RiskManager:
                     "qty": qty,
                     "max_price_seen": price if side == "Buy" else -1.0,
                     "min_price_seen": price if side == "Sell" else 999999.0,
-                    "trailing_active": False
+                    "trailing_active": False,
+                    "quality_score": self.pending_quality.pop(symbol, 2)
                 }
+                self.position_entry_time[symbol] = time.time()
             else:
                 # Update existing (Average entry logic could be added)
                 pos = self.active_positions[symbol]
@@ -109,6 +127,8 @@ class RiskManager:
                     # Decrease or close
                     if qty >= pos["qty"]:
                         del self.active_positions[symbol]
+                        self.position_entry_time.pop(symbol, None)
+                        self.trailing_activation_time.pop(symbol, None)
                     else:
                         pos["qty"] -= qty
 
@@ -120,6 +140,7 @@ class RiskManager:
 
         pos = self.active_positions[symbol]
         current_price = event.close
+        pos["last_price"] = current_price
         side = pos["side"]
 
         # Level 1: Hard Stop Loss (-2%)
@@ -134,17 +155,21 @@ class RiskManager:
             if current_price > pos["max_price_seen"]:
                 pos["max_price_seen"] = current_price
 
-            # Trailing Stop Trigger (+1.5% profit)
+            # Trailing Stop Trigger
             profit_pct = (current_price - pos["entry_price"]) / pos["entry_price"]
             if profit_pct >= settings.TRAILING_STOP_TRIGGER:
-                pos["trailing_active"] = True
+                if not pos["trailing_active"]:
+                    pos["trailing_active"] = True
+                    self.trailing_activation_time[symbol] = time.time()
 
             if pos["trailing_active"]:
-                # Trailing SL: 1.5% from max seen price
-                ts_sl = pos["max_price_seen"] * (1 - settings.TRAILING_STOP_TRIGGER)
-                if current_price <= ts_sl:
-                    logger.warning("local_ts_triggered", symbol=symbol, price=current_price, ts_sl=ts_sl)
-                    await self._emergency_close(symbol)
+                # 5-minute delay check after activation
+                if time.time() - self.trailing_activation_time.get(symbol, 0) >= 300:
+                    # Trailing SL from max seen price
+                    ts_sl = pos["max_price_seen"] * (1 - settings.TRAILING_STOP_TRIGGER)
+                    if current_price <= ts_sl:
+                        logger.warning("local_ts_triggered", symbol=symbol, price=current_price, ts_sl=ts_sl)
+                        await self._emergency_close(symbol)
 
         elif side == "Sell":
             sl_price = pos["entry_price"] * (1 + settings.STOP_LOSS_PCT)
@@ -156,15 +181,20 @@ class RiskManager:
             if current_price < pos["min_price_seen"]:
                 pos["min_price_seen"] = current_price
 
+            # Trailing Stop Trigger
             profit_pct = (pos["entry_price"] - current_price) / pos["entry_price"]
             if profit_pct >= settings.TRAILING_STOP_TRIGGER:
-                pos["trailing_active"] = True
+                if not pos["trailing_active"]:
+                    pos["trailing_active"] = True
+                    self.trailing_activation_time[symbol] = time.time()
 
             if pos["trailing_active"]:
-                ts_sl = pos["min_price_seen"] * (1 + settings.TRAILING_STOP_TRIGGER)
-                if current_price >= ts_sl:
-                    logger.warning("local_ts_triggered", symbol=symbol, price=current_price, ts_sl=ts_sl)
-                    await self._emergency_close(symbol)
+                # 5-minute delay check after activation
+                if time.time() - self.trailing_activation_time.get(symbol, 0) >= 300:
+                    ts_sl = pos["min_price_seen"] * (1 + settings.TRAILING_STOP_TRIGGER)
+                    if current_price >= ts_sl:
+                        logger.warning("local_ts_triggered", symbol=symbol, price=current_price, ts_sl=ts_sl)
+                        await self._emergency_close(symbol)
 
     async def _emergency_close(self, symbol: str):
         """Force close position via Market order."""
@@ -184,6 +214,8 @@ class RiskManager:
         await execution_manager.execute(signal, "RiskManager_Emergency")
         if symbol in self.active_positions:
             del self.active_positions[symbol]
+            self.position_entry_time.pop(symbol, None)
+            self.trailing_activation_time.pop(symbol, None)
 
     async def get_equity(self) -> float:
         balance = await self._get_balance()
@@ -259,6 +291,29 @@ class RiskManager:
     async def check_signal(self, signal: Signal) -> tuple[bool, str]:
         self._check_reset()
 
+        # 1. Correlation & Max Positions Check
+        active_symbols = [s for s in self.active_positions.keys() if s != signal.symbol]
+
+        if signal.symbol not in self.active_positions:
+            # Max 2 positions
+            if len(active_symbols) >= 2:
+                should_replace, symbol_to_replace = self._should_replace_position(signal, active_symbols)
+                if should_replace:
+                    logger.info("risk_replacing_position", new=signal.symbol, old=symbol_to_replace)
+                    await self._emergency_close(symbol_to_replace)
+                    # Refresh active_symbols after closing one
+                    active_symbols = [s for s in self.active_positions.keys() if s != signal.symbol]
+                else:
+                    return False, f"MAX_POSITIONS: 2 positions already active ({', '.join(active_symbols)})"
+
+            # Correlation check
+            for active_s in active_symbols:
+                if self._are_correlated(signal.symbol, active_s):
+                    return False, f"CORRELATED_ASSET: {active_s} is already open"
+
+            # Store quality for handle_order_update
+            self.pending_quality[signal.symbol] = self._get_quality_score(signal)
+
         # Only update trading mode if it's not already in EMERGENCY_STOP
         # (or periodically as handled by update_trading_mode cache)
         if self.trading_mode != TradingMode.EMERGENCY_STOP:
@@ -329,6 +384,52 @@ class RiskManager:
         symbols = list(self.active_positions.keys())
         for s in symbols:
             await self._emergency_close(s)
+
+    def _are_correlated(self, s1: str, s2: str) -> bool:
+        for group in CORRELATION_GROUPS.values():
+            for pair in group:
+                if (s1 == pair[0] and s2 == pair[1]) or (s1 == pair[1] and s2 == pair[0]):
+                    return True
+        return False
+
+    def _should_replace_position(self, new_signal: Signal, active_symbols: List[str]) -> tuple[bool, Optional[str]]:
+        new_quality = self._get_quality_score(new_signal)
+
+        profits = []
+        for symbol in active_symbols:
+            pos = self.active_positions.get(symbol, {})
+            last_price = pos.get("last_price", pos.get("entry_price"))
+            side = pos.get("side")
+            entry_price = pos.get("entry_price", 1.0)
+
+            pnl_pct = (last_price - entry_price) / entry_price
+            if side == "Sell": pnl_pct = -pnl_pct
+            profits.append((symbol, pnl_pct, pos.get("quality_score", 2)))
+
+        # Rule: If both existing profitable > 2% -> Reject new signal (don't close winners)
+        if all(p[1] > 0.02 for p in profits):
+            return False, None
+
+        # Rule: If one losing > -1% (i.e. -2% < pnl < -1%) -> Replace the loser
+        # Wait, user said "одна убыточная > -1% → Закрыть убыточную".
+        # In Russian "> -1%" for loss usually means "worse than -1%", i.e. PnL < -0.01.
+        for symbol, pnl, quality in profits:
+            if pnl < -0.01:
+                return True, symbol
+
+        # Quality-based replacement
+        for symbol, pnl, quality in profits:
+            # Type A (3) replaces Type C (1)
+            if new_quality >= 3 and quality <= 1:
+                return True, symbol
+
+        return False, None
+
+    def _get_quality_score(self, signal: Signal) -> int:
+        if "Type A" in signal.reason: return 3
+        if "Type B" in signal.reason: return 2
+        if "Type C" in signal.reason: return 1
+        return 2
 
     async def _is_reduce_only(self, signal: Signal) -> bool:
         if settings.SIMULATION_MODE:

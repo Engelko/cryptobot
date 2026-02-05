@@ -33,22 +33,11 @@ async def run_optimization():
 
                 df = df.sort_values('ts').reset_index(drop=True)
 
-                # 1. Optimize Trend Following (Golden Cross)
-                best_trend = {"fast": 50, "slow": 200, "sharpe": -1}
-                for f in [8, 12, 16, 20]:
-                    for s in [40, 50, 60, 100]:
-                        sharpe = backtest_trend(df, f, s)
-                        if sharpe > best_trend["sharpe"]:
-                            best_trend = {"fast": f, "slow": s, "sharpe": sharpe}
+                # 1. Optimize Trend Following (Golden Cross) with Walk-Forward
+                best_trend = walk_forward_optimize_trend(df)
 
-                # 2. Optimize Mean Reversion (RSI)
-                best_mr = {"rsi_period": 14, "overbought": 70, "oversold": 30, "sharpe": -1}
-                for p in [10, 14, 18]:
-                    for ob in [65, 70, 75]:
-                        for os_val in [25, 30, 35]:
-                            sharpe = backtest_mr(df, p, ob, os_val)
-                            if sharpe > best_mr["sharpe"]:
-                                best_mr = {"rsi_period": p, "overbought": ob, "oversold": os_val, "sharpe": sharpe}
+                # 2. Optimize Mean Reversion (RSI) with Walk-Forward
+                best_mr = walk_forward_optimize_mr(df)
 
                 # 3. Update Config
                 update_config(best_trend, best_mr)
@@ -85,6 +74,45 @@ def backtest_mr(df, p, ob, os_val):
     df['ret'] = df['close'].pct_change() * df['pos'].shift(1)
     if df['ret'].std() == 0 or np.isnan(df['ret'].std()): return 0
     return (df['ret'].mean() / df['ret'].std()) * np.sqrt(24*365)
+
+def walk_forward_optimize_trend(df, windows=3):
+    n = len(df)
+    step = n // (windows + 1)
+    params = []
+    for f in [8, 12, 16, 20]:
+        for s in [40, 50, 60, 100]:
+            params.append((f, s))
+
+    results = []
+    for f, s in params:
+        sharpes = []
+        for i in range(windows):
+            chunk = df.iloc[i*step : (i+2)*step]
+            sharpes.append(backtest_trend(chunk, f, s))
+        results.append({"f": f, "s": s, "sharpe": np.mean(sharpes)})
+
+    best = max(results, key=lambda x: x["sharpe"])
+    return {"fast": best["f"], "slow": best["s"], "sharpe": best["sharpe"]}
+
+def walk_forward_optimize_mr(df, windows=3):
+    n = len(df)
+    step = n // (windows + 1)
+    params = []
+    for p in [10, 14, 18]:
+        for ob in [65, 70, 75]:
+            for os_val in [25, 30, 35]:
+                params.append((p, ob, os_val))
+
+    results = []
+    for p, ob, os_val in params:
+        sharpes = []
+        for i in range(windows):
+            chunk = df.iloc[i*step : (i+2)*step]
+            sharpes.append(backtest_mr(chunk, p, ob, os_val))
+        results.append({"p": p, "ob": ob, "os": os_val, "sharpe": np.mean(sharpes)})
+
+    best = max(results, key=lambda x: x["sharpe"])
+    return {"rsi_period": best["p"], "overbought": best["ob"], "oversold": best["os"], "sharpe": best["sharpe"]}
 
 def update_config(trend, mr):
     if not os.path.exists(CONFIG_PATH): return

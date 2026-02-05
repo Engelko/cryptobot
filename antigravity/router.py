@@ -16,13 +16,13 @@ class StrategyRouter:
     def __init__(self):
         pass
 
-    def check_signal(self, signal: Signal, strategy_name: str, regime_data: Optional[MarketRegimeData]) -> bool:
+    def check_signal(self, signal: Signal, strategy_name: str, regime_data: Optional[MarketRegimeData]) -> tuple[bool, str]:
         """
-        Returns True if signal is allowed in current regime.
+        Returns (True, "") if signal is allowed in current regime, else (False, reason).
         """
         if not regime_data:
             # Default allow if no regime data (e.g. startup)
-            return True
+            return True, ""
 
         regime = regime_data.regime
 
@@ -37,28 +37,38 @@ class StrategyRouter:
         # 1. Grid Strategies -> Only RANGING
         if "Grid" in strategy_name:
             if regime not in [MarketRegime.RANGING]:
-                logger.debug("router_block", strategy=strategy_name, regime=regime.value, reason="Grid only in Range")
-                return False
+                reason = f"Grid only in RANGING (current: {regime.value})"
+                logger.debug("router_block", strategy=strategy_name, reason=reason)
+                return False, reason
 
         # 2. Trend Strategies -> Only TRENDING (UP/DOWN) or VOLATILE (as Spot)
         if "Trend" in strategy_name or "GoldenCross" in strategy_name:
+             # Allow GoldenCross in UNCERTAIN with ADX > 20
+             if strategy_name == "GoldenCross" and regime == MarketRegime.UNCERTAIN:
+                 if regime_data and regime_data.adx > 20:
+                     return True, ""
+
              if regime not in [MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN, MarketRegime.VOLATILE]:
-                 logger.debug("router_block", strategy=strategy_name, regime=regime.value, reason="Trend only in Trend or Volatile")
-                 return False
+                 reason = f"Trend only in TRENDING or VOLATILE (current: {regime.value})"
+                 logger.debug("router_block", strategy=strategy_name, reason=reason)
+                 return False, reason
 
              # Counter-trend check
              if regime == MarketRegime.TRENDING_UP and signal.type == SignalType.SELL:
-                 logger.debug("router_block", strategy=strategy_name, regime=regime.value, reason="No counter-trend shorts")
-                 return False
+                 reason = f"No counter-trend shorts in {regime.value}"
+                 logger.debug("router_block", strategy=strategy_name, reason=reason)
+                 return False, reason
              if regime == MarketRegime.TRENDING_DOWN and signal.type == SignalType.BUY:
-                 logger.debug("router_block", strategy=strategy_name, regime=regime.value, reason="No counter-trend longs")
-                 return False
+                 reason = f"No counter-trend longs in {regime.value}"
+                 logger.debug("router_block", strategy=strategy_name, reason=reason)
+                 return False, reason
 
         # 3. Volatility Strategies -> Only VOLATILE or Strong Trend
         if "Volatility" in strategy_name or "Breakout" in strategy_name:
             if regime == MarketRegime.RANGING and regime_data.adx < 15:
-                 logger.debug("router_block", strategy=strategy_name, regime=regime.value, reason="No Breakout in deep flat")
-                 return False
+                 reason = f"No Breakout in deep flat (ADX: {regime_data.adx})"
+                 logger.debug("router_block", strategy=strategy_name, reason=reason)
+                 return False, reason
 
         # 4. Mean Reversion / Scalping -> RANGING or VOLATILE (careful)
         if "MeanReversion" in strategy_name or "Scalp" in strategy_name:
@@ -66,9 +76,10 @@ class StrategyRouter:
                  # Don't scalp against strong trend
                  if (regime == MarketRegime.TRENDING_UP and signal.type == SignalType.SELL) or \
                     (regime == MarketRegime.TRENDING_DOWN and signal.type == SignalType.BUY):
-                        logger.debug("router_block", strategy=strategy_name, regime=regime.value, reason="No counter-trend scalp in strong trend")
-                        return False
+                        reason = f"No counter-trend scalp in strong trend (ADX: {regime_data.adx})"
+                        logger.debug("router_block", strategy=strategy_name, reason=reason)
+                        return False, reason
 
-        return True
+        return True, ""
 
 strategy_router = StrategyRouter()

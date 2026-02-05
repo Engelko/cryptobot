@@ -58,7 +58,7 @@ strategies:
   mean_reversion:
     bb_period: 20
     bb_std: 2.0
-    enabled: false
+    enabled: true
     name: BollingerRSI
     risk_per_trade: 0.02
     leverage: 1.0
