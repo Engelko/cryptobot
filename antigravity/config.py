@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     MAX_LEVERAGE: float = Field(3.0, gt=0, description="Max leverage")
     MAX_SPREAD: float = Field(0.001, description="Max allowed spread for liquidity check")
     STOP_LOSS_PCT: float = Field(0.02, description="Hard stop loss percentage")
-    TRAILING_STOP_TRIGGER: float = Field(0.015, description="Trailing stop activation profit percentage")
+    TRAILING_STOP_TRIGGER: float = Field(0.025, description="Trailing stop activation profit percentage")
     INITIAL_DEPOSIT: float = Field(0.0, description="Initial deposit for drawdown tracking (set to 0.0 for auto-initialization from current balance)")
     RECOVERY_THRESHOLD: float = Field(0.70, description="Equity % to enter recovery mode")
     EMERGENCY_THRESHOLD: float = Field(0.50, description="Equity % for emergency stop")
@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     COINGECKO_API_KEY: str = Field(default="", description="CoinGecko API Key (Demo/Pro)")
     COINGECKO_PRO: bool = Field(default=False, description="Set to True if using CoinGecko Pro API")
     MESSARI_API_KEY: str = Field(default="", description="Messari API Key")
+    ENABLE_ONCHAIN_FILTER: bool = Field(True, description="Enable On-chain score filtering")
+    ONCHAIN_BUY_THRESHOLD: float = Field(0.3, description="Reject BUY if score < threshold")
+    ONCHAIN_SELL_THRESHOLD: float = Field(0.7, description="Reject SELL if score > threshold")
 
     def model_post_init(self, __context):
         # Handle string input for list if coming from .env as a string

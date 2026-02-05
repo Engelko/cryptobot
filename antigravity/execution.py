@@ -743,11 +743,23 @@ class RealBroker:
             # Fallback to simple string format
             return f"{qty:.{precision}f}"
 
+    PRICE_PRECISION = {
+        "BTCUSDT": 2,
+        "ETHUSDT": 2,
+        "SOLUSDT": 2,
+        "XRPUSDT": 4,
+        "ADAUSDT": 4,
+        "DOGEUSDT": 5,
+        "BNBUSDT": 2,
+        "MATICUSDT": 4,
+        "DOTUSDT": 3,
+        "LTCUSDT": 2,
+    }
+
     def _format_price(self, symbol: str, price: float) -> str:
         """Formats price to appropriate precision."""
-        # Simple heuristic: BTC uses 2, ETH uses 2, others might use more.
-        # Use 2 as default for linear USDT pairs.
-        return f"{price:.2f}"
+        precision = self.PRICE_PRECISION.get(symbol, 2)
+        return f"{price:.{precision}f}"
 
     def _parse_available_balance(self, data: Dict) -> float:
         """

@@ -11,6 +11,7 @@ from antigravity.client import BybitClient
 from antigravity.regime_detector import market_regime_detector
 from antigravity.router import strategy_router
 from antigravity.onchain_analyzer import onchain_analyzer
+from antigravity.strategy_orchestrator import orchestrator
 from antigravity.performance_guard import performance_guard
 import pandas as pd
 
@@ -153,6 +154,11 @@ class StrategyEngine:
 
     async def _handle_trade_closed(self, event: TradeClosedEvent):
         await performance_guard.check_performance(event.strategy)
+        try:
+            from antigravity.performance_metrics import performance_metrics
+            performance_metrics.calculate_for_strategy(event.strategy)
+        except Exception as e:
+            logger.error("metrics_update_failed", strategy=event.strategy, error=str(e))
 
     async def stop(self):
         self._running = False
@@ -186,6 +192,9 @@ class StrategyEngine:
 
                      # 1. Update Regime
                      market_regime_detector.analyze(event.symbol, recent_klines)
+
+                     # 1b. Strategy Orchestrator Evaluation
+                     orchestrator.evaluate(self.strategies, market_regime_detector.regimes)
 
                      # 2. AI Prediction (LightGBM)
                      if self.ml_engine.enabled:
@@ -244,11 +253,12 @@ class StrategyEngine:
 
         # 0. Strategy Router Check (Regime Filter)
         regime_data = market_regime_detector.regimes.get(signal.symbol)
-        if not strategy_router.check_signal(signal, strategy_name, regime_data):
-            logger.info("signal_rejected_by_router", strategy=strategy_name, symbol=signal.symbol, regime=regime_data.regime.value if regime_data else "None")
+        allowed, router_reason = strategy_router.check_signal(signal, strategy_name, regime_data)
+        if not allowed:
+            logger.info("signal_rejected_by_router", strategy=strategy_name, symbol=signal.symbol, reason=router_reason)
              # Save rejected signal
             db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price,
-                           f"[REJECTED: Market Regime] {signal.reason}")
+                           f"[REJECTED: Market Regime] {router_reason}")
             return
 
         # 1. AI Agent Filter
@@ -276,12 +286,13 @@ class StrategyEngine:
             db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price, "[REJECTED: Whale Activity]")
             return
 
-        onchain_score = onchain_analyzer.get_score()
-        if (signal.type == SignalType.BUY and onchain_score < 0.4) or \
-           (signal.type == SignalType.SELL and onchain_score > 0.6):
-            logger.info("signal_rejected_by_onchain", symbol=signal.symbol, reason="score_mismatch", score=onchain_score)
-            db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price, f"[REJECTED: On-chain Score {onchain_score:.2f}]")
-            return
+        if settings.ENABLE_ONCHAIN_FILTER:
+            onchain_score = onchain_analyzer.get_score()
+            if (signal.type == SignalType.BUY and onchain_score < settings.ONCHAIN_BUY_THRESHOLD) or \
+               (signal.type == SignalType.SELL and onchain_score > settings.ONCHAIN_SELL_THRESHOLD):
+                logger.info("signal_rejected_by_onchain", symbol=signal.symbol, reason="score_mismatch", score=onchain_score)
+                db.save_signal(strategy_name, signal.symbol, signal.type.value, signal.price, f"[REJECTED: On-chain Score {onchain_score:.2f}]")
+                return
 
         # 3. Risk Check
         passed, risk_reason = await self.risk_manager.check_signal(signal)
