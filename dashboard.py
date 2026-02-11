@@ -773,6 +773,52 @@ with col_main:
             new_initial_deposit = c2.number_input("Initial Deposit ($) for Drawdown", value=settings.INITIAL_DEPOSIT)
 
             st.divider()
+            st.markdown("#### 🤖 Strategy Activation (ACTIVE_STRATEGIES)")
+
+            strategy_options = {
+                "Trend Following (GoldenCross)": "GoldenCross",
+                "Mean Reversion (BollingerRSI)": "BollingerRSI",
+                "Volatility Breakout": "VolatilityBreakout",
+                "Scalping": "Scalping",
+                "Bollinger Squeeze": "BBSqueeze",
+                "Grid Trading": "GridMaster",
+                "Dynamic Risk/Leverage": "DynamicRiskLeverage"
+            }
+
+            current_active = settings.ACTIVE_STRATEGIES
+            if isinstance(current_active, str):
+                 try:
+                     current_active = json.loads(current_active)
+                 except:
+                     current_active = [s.strip() for s in current_active.split(",")]
+
+            # Normalize current active strategies for display
+            reverse_mapping = {
+                "MACD_Trend": "GoldenCross",
+                "GoldenCross": "GoldenCross",
+                "TrendFollowing": "GoldenCross",
+                "RSI_Reversion": "BollingerRSI",
+                "BollingerRSI": "BollingerRSI",
+                "MeanReversion": "BollingerRSI",
+                "ATRBreakout": "VolatilityBreakout",
+                "VolatilityBreakout": "VolatilityBreakout",
+                "StochScalp": "Scalping",
+                "Scalping": "Scalping",
+                "BBSqueeze": "BBSqueeze",
+                "GridMaster": "GridMaster",
+                "Grid": "GridMaster",
+                "DynamicRiskLeverage": "DynamicRiskLeverage"
+            }
+            normalized_active = [reverse_mapping.get(s, s) for s in current_active]
+
+            selected_display_names = st.multiselect(
+                "Select Active Strategies",
+                options=list(strategy_options.keys()),
+                default=[k for k, v in strategy_options.items() if v in normalized_active]
+            )
+            new_active_list = [strategy_options[name] for name in selected_display_names]
+
+            st.divider()
             st.markdown("#### 🎯 Strategy Risk Settings (strategies.yaml)")
 
             # Create a column for each strategy's risk
@@ -815,6 +861,7 @@ with col_main:
                 # 2. Update .env
                 env_updates = {
                     "TRADING_SYMBOLS": json.loads(new_symbols),
+                    "ACTIVE_STRATEGIES": new_active_list,
                     "MAX_LEVERAGE": new_leverage,
                     "MAX_DAILY_LOSS": new_daily_loss,
                     "MAX_POSITION_SIZE": new_pos_size,

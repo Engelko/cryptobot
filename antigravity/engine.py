@@ -13,6 +13,7 @@ from antigravity.router import strategy_router
 from antigravity.onchain_analyzer import onchain_analyzer
 from antigravity.strategy_orchestrator import orchestrator
 from antigravity.performance_guard import performance_guard
+from antigravity.config import settings
 import pandas as pd
 
 logger = get_logger("strategy_engine")
