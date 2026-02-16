@@ -5,6 +5,8 @@ venv/
 __pycache__/
 data.db
 storage/*.db*
+storage/*.log
+storage/*.joblib
 .streamlit/logs/
 
 # Environment Variables

@@ -1,22 +1,13 @@
-# Fee Configuration (Optional overrides, defaults in antigravity/fees.py)
-# fees:
-#   spot:
-#     maker: 0.001
-#     taker: 0.001
-#   linear:
-#     maker: 0.0002
-#     taker: 0.00055
-
 strategies:
   bb_squeeze:
     bb_period: 20
     bb_std: 2.0
     enabled: false
     keltner_multiplier: 1.5
+    leverage: 1.0
     momentum_period: 12
     name: BBSqueeze
     risk_per_trade: 0.02
-    leverage: 1.0
   dynamic_risk_leverage:
     daily_loss_limit: 0.05
     ema_fast: 20
@@ -49,42 +40,45 @@ strategies:
     volume_ma_period: 20
   grid:
     amount_per_grid: 0.001
+    atr_multiplier: 3.0
     enabled: false
     grid_levels: 10
-    lower_price: 40000.0
-    name: GridMaster
-    upper_price: 50000.0
     leverage: 1.0
+    lower_price: 0.0
+    name: GridMaster
+    risk_per_trade: 0.02
+    upper_price: 0.0
+    use_dynamic_range: true
   mean_reversion:
     bb_period: 20
     bb_std: 2.0
     enabled: true
+    leverage: 1.0
     name: BollingerRSI
     risk_per_trade: 0.02
-    leverage: 1.0
-    rsi_overbought: 70
-    rsi_oversold: 30
-    rsi_period: 14
+    rsi_overbought: 65
+    rsi_oversold: 25
+    rsi_period: 10
   scalping:
     d_period: 3
     enabled: false
     k_period: 14
+    leverage: 1.0
     name: StochScalp
     overbought: 80
     oversold: 20
     risk_per_trade: 0.01
-    leverage: 1.0
   trend_following:
     enabled: false
-    fast_period: 50
+    fast_period: 8
+    leverage: 1.0
     name: GoldenCross
     risk_per_trade: 0.02
-    leverage: 1.0
-    slow_period: 200
+    slow_period: 50
   volatility_breakout:
     atr_period: 14
     enabled: false
+    leverage: 1.0
     multiplier: 3.0
     name: ATRBreakout
     risk_per_trade: 0.02
-    leverage: 1.0

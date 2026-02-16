@@ -6,6 +6,8 @@ from antigravity.logging import get_logger
 
 logger = get_logger("strategy_grid_improved")
 
+KILL_SWITCH_THROTTLE_SECONDS = 300  # Log kill-switch only once per 5 minutes per symbol
+
 class GridMasterImproved(BaseStrategy):
     """
     GridMasterImproved: A Grid Trading Strategy with dynamic range and validation.
@@ -26,6 +28,7 @@ class GridMasterImproved(BaseStrategy):
         # State per symbol
         # {symbol: {"lower": float, "upper": float, "grid_prices": [], "active_orders": {}, "initialized": bool}}
         self.grid_states = {}
+        self.kill_switch_last_log = {}  # Throttle kill-switch warnings
         for s in symbols:
             self.grid_states[s] = {
                 "lower": self.lower_price_config,
@@ -204,19 +207,16 @@ class GridMasterImproved(BaseStrategy):
                 await self.save_state()
 
     async def _check_kill_switch(self, symbol: str, current_price: float, state: Dict) -> Optional[Signal]:
-        """
-        Stop Loss / Kill Switch for Grid.
-        If price moves significantly outside the grid, close all positions to prevent liquidation/deep bags.
-        """
-        # Buffer: 5% outside range
         lower_limit = state["lower"] * 0.95
         upper_limit = state["upper"] * 1.05
 
-        # If price drops below lower limit (Holding Longs in falling market)
         if current_price < lower_limit:
-            logger.warning("grid_kill_switch_triggered", symbol=symbol, price=current_price, limit=lower_limit, reason="Price below grid")
-            # Signal SELL to close everything (assuming execution manager handles "SELL" as "Close Long")
-            # We reset state to stop grid
+            import time
+            now = time.time()
+            last_log = self.kill_switch_last_log.get(symbol, 0)
+            if now - last_log > KILL_SWITCH_THROTTLE_SECONDS:
+                logger.warning("grid_kill_switch_triggered", symbol=symbol, price=current_price, limit=lower_limit, reason="Price below grid")
+                self.kill_switch_last_log[symbol] = now
             state["initialized"] = False
             state["active_orders"] = {}
             state["pending_placements"] = []

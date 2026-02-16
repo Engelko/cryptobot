@@ -5,7 +5,8 @@ import json
 from typing import Optional, Dict, List, Any
 from urllib.parse import urlencode
 
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+import logging
 
 from antigravity.config import settings
 from antigravity.logging import get_logger
@@ -14,6 +15,16 @@ from antigravity.exceptions import APIError, AntigravityError
 from antigravity.utils import safe_float
 
 logger = get_logger("bybit_client")
+
+RETRYABLE_API_CODES = [
+    110007,  # Insufficient balance (might be temporary)
+    10001,   # Rate limit
+    10016,   # Server error
+]
+
+class RetryableAPIError(APIError):
+    """API Error that should trigger a retry."""
+    pass
 
 class BybitClient:
     def __init__(self):
@@ -38,9 +49,8 @@ class BybitClient:
 
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        # Retry on network errors and 5xx/429 server errors (APIError with status >= 500)
-        retry=retry_if_exception_type(aiohttp.ClientError),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        retry=retry_if_exception_type((aiohttp.ClientError, RetryableAPIError)),
         reraise=True
     )
     async def _request(self, method: str, endpoint: str, payload: Dict[str, Any] = None, suppress_error_log: bool = False, ignorable_ret_codes: List[int] = None) -> Any:
@@ -81,6 +91,9 @@ class BybitClient:
                 if ret_code != 0:
                     if not suppress_error_log and (not ignorable_ret_codes or ret_code not in ignorable_ret_codes):
                         logger.error("api_error", ret_code=ret_code, ret_msg=data.get("retMsg"))
+                    if ret_code in RETRYABLE_API_CODES:
+                        logger.warning("api_error_retryable", ret_code=ret_code, ret_msg=data.get("retMsg"))
+                        raise RetryableAPIError(data.get("retMsg"), ret_code, response.status)
                     raise APIError(data.get("retMsg"), ret_code, response.status)
                 
                 return data.get("result")

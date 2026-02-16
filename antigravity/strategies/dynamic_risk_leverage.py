@@ -394,22 +394,35 @@ class DynamicRiskLeverageStrategy(BaseStrategy):
             reasons.append("bearish_macd_cross")
         
         # Determine entry type based on score
-        if score >= 6:
+        max_leverage = min(settings.MAX_LEVERAGE, 3.0)
+        if not settings.DYNAMIC_LEVERAGE_ENABLED:
+            leverage = max_leverage
+        elif score >= 6:
             entry_type = EntryType.TYPE_A
-            leverage = self.config.high_risk_leverage  # CONSERVATIVE: 2.5x
+            leverage = min(self.config.high_risk_leverage, max_leverage)
             risk = self.config.type_a_risk
         elif score >= 2:
             entry_type = EntryType.TYPE_B
-            leverage = self.config.medium_risk_leverage  # MODERATE: 6.0x
+            leverage = min(self.config.medium_risk_leverage, max_leverage)
             risk = self.config.type_b_risk
         elif score >= -1:
             entry_type = EntryType.TYPE_C
-            leverage = self.config.low_risk_leverage  # AGGRESSIVE: 9.0x
+            leverage = min(self.config.low_risk_leverage, max_leverage)
             risk = self.config.type_c_risk
         else:
-            entry_type = EntryType.TYPE_C  # Very weak signal
-            leverage = self.config.low_risk_leverage * 0.8  # Even lower leverage
+            entry_type = EntryType.TYPE_C
+            leverage = max_leverage
             risk = self.config.type_c_risk * 0.8
+        
+        if score >= 6:
+            entry_type = EntryType.TYPE_A
+            risk = self.config.type_a_risk
+        elif score >= 2:
+            entry_type = EntryType.TYPE_B
+            risk = self.config.type_b_risk
+        else:
+            entry_type = EntryType.TYPE_C
+            risk = self.config.type_c_risk
         
         return {
             "type": entry_type,

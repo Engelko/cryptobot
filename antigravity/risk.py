@@ -16,8 +16,8 @@ from antigravity.telegram_alerts import telegram_alerts
 
 logger = get_logger("risk_manager")
 
-# Minimum order cost in USDT (approximate)
 MIN_ORDER_COST = 10.0
+BLACKLISTED_SYMBOLS = ["XRPUSDT"]  # Symbols with systematic losses
 
 class TradingMode(Enum):
     NORMAL = "NORMAL"
@@ -291,6 +291,11 @@ class RiskManager:
     async def check_signal(self, signal: Signal) -> tuple[bool, str]:
         self._check_reset()
 
+        # 0. Blacklisted symbols check
+        if signal.symbol in BLACKLISTED_SYMBOLS:
+            logger.warning("risk_block_blacklisted", symbol=signal.symbol, reason="Historical systematic losses")
+            return False, f"BLACKLISTED: {signal.symbol} has systematic losses history"
+
         # 1. Correlation & Max Positions Check
         active_symbols = [s for s in self.active_positions.keys() if s != signal.symbol]
 
@@ -378,6 +383,16 @@ class RiskManager:
             signal.quantity = target_qty
 
         signal.stop_loss = signal.price * (1 - settings.STOP_LOSS_PCT) if signal.type == SignalType.BUY else signal.price * (1 + settings.STOP_LOSS_PCT)
+
+        # Single trade loss check
+        if signal.price and signal.price > 0 and signal.quantity and signal.quantity > 0:
+            position_value = signal.price * signal.quantity
+            max_loss_amount = position_value * settings.STOP_LOSS_PCT
+            if max_loss_amount > settings.MAX_SINGLE_TRADE_LOSS:
+                logger.warning("risk_block_single_trade_loss", symbol=signal.symbol, 
+                             potential_loss=max_loss_amount, max_allowed=settings.MAX_SINGLE_TRADE_LOSS)
+                return False, f"Potential loss ${max_loss_amount:.2f} exceeds MAX_SINGLE_TRADE_LOSS ${settings.MAX_SINGLE_TRADE_LOSS}"
+
         return True, signal.reason
 
     async def _close_all_positions(self):

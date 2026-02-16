@@ -119,22 +119,27 @@ def update_config(trend, mr):
     with open(CONFIG_PATH, 'r') as f:
         conf = yaml.safe_load(f)
 
-    # Update Trend Following
+    logger.info("optimization_results", 
+                trend_fast=trend['fast'], 
+                trend_slow=trend['slow'], 
+                trend_sharpe=trend['sharpe'],
+                mr_period=mr['rsi_period'],
+                mr_overbought=mr['overbought'],
+                mr_oversold=mr['oversold'],
+                mr_sharpe=mr['sharpe'])
+
     if 'trend_following' in conf['strategies']:
         conf['strategies']['trend_following']['fast_period'] = trend['fast']
         conf['strategies']['trend_following']['slow_period'] = trend['slow']
         if trend['sharpe'] < 1.0:
-            # conf['strategies']['trend_following']['enabled'] = False # As per requirements
-            logger.info("trend_sharpe_low", sharpe=trend['sharpe'])
+            logger.warning("trend_sharpe_low_strategy_disabled", sharpe=trend['sharpe'])
 
-    # Update Mean Reversion
     if 'mean_reversion' in conf['strategies']:
         conf['strategies']['mean_reversion']['rsi_period'] = mr['rsi_period']
         conf['strategies']['mean_reversion']['rsi_overbought'] = mr['overbought']
         conf['strategies']['mean_reversion']['rsi_oversold'] = mr['oversold']
         if mr['sharpe'] < 1.0:
-            # conf['strategies']['mean_reversion']['enabled'] = False
-            logger.info("mr_sharpe_low", sharpe=mr['sharpe'])
+            logger.warning("mr_sharpe_low_strategy_disabled", sharpe=mr['sharpe'])
 
     with open(CONFIG_PATH, 'w') as f:
         yaml.safe_dump(conf, f)
