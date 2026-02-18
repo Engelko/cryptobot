@@ -41,10 +41,10 @@ PROFILES: Dict[str, TradingProfile] = {
         is_testnet=True,
         
         max_spread=0.10,
-        max_leverage=2.0,
+        max_leverage=3.0,
         max_daily_loss=100.0,
         max_position_size=100.0,
-        max_single_trade_loss=15.0,
+        max_single_trade_loss=30.0,
         stop_loss_pct=0.02,
         take_profit_pct=0.06,
         trailing_stop_trigger=0.025,
@@ -57,10 +57,10 @@ PROFILES: Dict[str, TradingProfile] = {
         
         enable_spread_check=True,
         spread_multiplier=10.0,
-        enable_spot_mode_for_volatile=False,
-        enable_regime_filter=False,
+        enable_spot_mode_for_volatile=True,
+        enable_regime_filter=True,
         
-        risk_per_trade=0.01
+        risk_per_trade=0.02
     ),
     
     "mainnet_conservative": TradingProfile(
