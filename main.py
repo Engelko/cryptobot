@@ -8,6 +8,7 @@ from antigravity.websocket_client import BybitWebSocket
 from antigravity.websocket_private import BybitPrivateWebSocket
 from antigravity.strategies.config import load_strategy_config
 from antigravity.config import settings
+from antigravity.profiles import get_current_profile, apply_profile_to_settings
 
 # Import Strategy Classes
 from antigravity.strategies.trend_improved import GoldenCrossImproved as TrendFollowingStrategy
@@ -79,6 +80,11 @@ async def main():
     # 1. Setup Logging
     configure_logging()
     logger.info("system_startup")
+
+    # 1.5 Load and apply trading profile
+    profile = get_current_profile()
+    apply_profile_to_settings()
+    logger.info("profile_loaded", name=profile.name, is_testnet=profile.is_testnet)
 
     # 2. Load Configuration
     config = load_strategy_config("strategies.yaml")

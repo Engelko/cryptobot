@@ -9,6 +9,12 @@ from antigravity.logging import get_logger
 
 logger = get_logger("strategy_volatility_breakout")
 
+# WARNING: This strategy is DISABLED due to high losses in production.
+# Analysis showed: 2 trades = -$35.25 loss, avg loss $17.63
+# Issues: No trend direction filter, no proper SL sizing
+# TODO: Add trend filter, improve SL logic before re-enabling
+STRATEGY_DISABLED = True
+
 class VolatilityBreakoutStrategy(BaseStrategy):
     def __init__(self, config: VolatilityConfig, symbols: List[str]):
         super().__init__(config.name, symbols)
@@ -17,6 +23,9 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         self.min_klines = config.atr_period + 10
 
     async def on_market_data(self, event: MarketDataEvent) -> Optional[Signal]:
+        if STRATEGY_DISABLED:
+            return None
+            
         if isinstance(event, KlineEvent):
             if event.symbol not in self.symbols:
                 return None

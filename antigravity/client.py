@@ -242,6 +242,47 @@ class BybitClient:
         res = await self._request("GET", endpoint, params)
         return res.get("list", [])
 
+    async def cancel_order(self, category: str, symbol: str, orderId: str = None, orderLinkId: str = None) -> bool:
+        """
+        Cancel an open order.
+        """
+        endpoint = "/v5/order/cancel"
+        payload = {
+            "category": category,
+            "symbol": symbol,
+        }
+        if orderId:
+            payload["orderId"] = orderId
+        elif orderLinkId:
+            payload["orderLinkId"] = orderLinkId
+        else:
+            raise ValueError("Either orderId or orderLinkId must be provided")
+
+        try:
+            await self._request("POST", endpoint, payload)
+            return True
+        except Exception as e:
+            logger.error("cancel_order_failed", error=str(e), symbol=symbol, orderId=orderId)
+            return False
+
+    async def cancel_all_orders(self, category: str, symbol: str = None) -> bool:
+        """
+        Cancel all open orders for a symbol or category.
+        """
+        endpoint = "/v5/order/cancel-all"
+        payload = {
+            "category": category,
+        }
+        if symbol:
+            payload["symbol"] = symbol
+
+        try:
+            await self._request("POST", endpoint, payload)
+            return True
+        except Exception as e:
+            logger.error("cancel_all_orders_failed", error=str(e), category=category, symbol=symbol)
+            return False
+
     async def get_closed_pnl(self, category: str = "linear", symbol: str = None, limit: int = 50) -> List[Dict]:
         """
         Get Closed PnL (History).

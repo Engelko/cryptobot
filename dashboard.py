@@ -10,6 +10,7 @@ import os
 import json
 import logging
 import yaml
+import subprocess
 import joblib
 import lightgbm
 from datetime import datetime, timezone, timedelta
@@ -753,9 +754,137 @@ with col_main:
 
     # ===== TAB 6: SETTINGS & SYSTEM =====
     with tabs[5]:
-        st.subheader("Global System Configuration")
+        st.subheader("⚙️ Profile & Configuration")
+        
+        from antigravity.profiles import get_current_profile, save_profile, PROFILES
+        import requests
+        
+        current_profile = get_current_profile()
+        
+        st.markdown("#### 🔄 Trading Profile")
+        
+        profile_col1, profile_col2 = st.columns([2, 1])
+        
+        with profile_col1:
+            st.markdown(f"""
+            <div style="padding: 20px; border-radius: 12px; background: {'#1a472a' if current_profile.is_testnet else '#4a1a1a'}; border: 2px solid {'#10B981' if current_profile.is_testnet else '#EF4444'};">
+                <h3 style="margin: 0; color: {'#10B981' if current_profile.is_testnet else '#EF4444'};">
+                    {'🧪 TESTNET' if current_profile.is_testnet else '🔴 MAINNET'}: {current_profile.name}
+                </h3>
+                <p style="color: #9CA3AF; margin-top: 10px;">{current_profile.description}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with profile_col2:
+            st.metric("Max Spread", f"{current_profile.max_spread*100:.1f}%")
+            st.metric("Max Leverage", f"{current_profile.max_leverage}x")
+        
+        st.divider()
+        
+        st.markdown("#### 📋 Select Profile")
+        
+        profile_options = {
+            "testnet": "🧪 Testnet - Для тестирования на Bybit Testnet",
+            "mainnet_conservative": "🛡️ Mainnet Conservative - Реальная торговля, минимальный риск",
+            "mainnet_aggressive": "⚡ Mainnet Aggressive - Реальная торговля, повышенный риск"
+        }
+        
+        current_profile_key = "testnet"
+        for key, profile in PROFILES.items():
+            if profile.name == current_profile.name:
+                current_profile_key = key
+                break
+        
+        selected_profile = st.selectbox(
+            "Выберите профиль торговли:",
+            options=list(profile_options.keys()),
+            format_func=lambda x: profile_options[x],
+            index=list(profile_options.keys()).index(current_profile_key)
+        )
+        
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
+        
+        with col_btn1:
+            if st.button("💾 Применить профиль", type="primary", use_container_width=True):
+                if selected_profile != current_profile_key:
+                    if save_profile(selected_profile):
+                        st.success(f"✅ Профиль изменен на: {PROFILES[selected_profile].name}")
+                        st.info("⏳ Бот будет перезапущен через 5 секунд...")
+                        st.balloons()
+                        import time
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error("❌ Ошибка сохранения профиля")
+                else:
+                    st.info("ℹ️ Этот профиль уже активен")
+        
+        with col_btn2:
+            if st.button("🔄 Перезапустить бота", type="secondary", use_container_width=True):
+                try:
+                    import requests
+                    response = requests.post("http://antigravity-settings-api:8080/api/bot/restart", timeout=5)
+                    if response.status_code == 200:
+                        st.success("✅ Перезапуск инициирован!")
+                        st.info("⏳ Бот будет перезапущен через 5 секунд...")
+                    else:
+                        st.error(f"API Error: {response.status_code}")
+                except Exception as e:
+                    st.error(f"Ошибка: {e}")
+        
+        with col_btn3:
+            if st.button("📊 Проверить статус", use_container_width=True):
+                try:
+                    import requests
+                    response = requests.get("http://antigravity-settings-api:8080/api/bot/status", timeout=5)
+                    if response.status_code == 200:
+                        data = response.json()
+                        st.success("✅ Статус получен:")
+                        for container in data.get("containers", []):
+                            st.text(container)
+                    else:
+                        st.error(f"API Error: {response.status_code}")
+                except Exception as e:
+                    st.error(f"Ошибка подключения к API: {e}")
+        
+        st.divider()
+        
+        with st.expander("📊 Параметры текущего профиля"):
+            params_col1, params_col2, params_col3 = st.columns(3)
+            
+            with params_col1:
+                st.markdown("**Risk Management**")
+                st.json({
+                    "Max Daily Loss": f"${current_profile.max_daily_loss}",
+                    "Max Position Size": f"${current_profile.max_position_size}",
+                    "Max Single Trade Loss": f"${current_profile.max_single_trade_loss}",
+                    "Risk Per Trade": f"{current_profile.risk_per_trade*100:.1f}%"
+                })
+            
+            with params_col2:
+                st.markdown("**Stop Loss / Take Profit**")
+                st.json({
+                    "Stop Loss": f"{current_profile.stop_loss_pct*100:.1f}%",
+                    "Take Profit": f"{current_profile.take_profit_pct*100:.1f}%",
+                    "Trailing Stop Trigger": f"{current_profile.trailing_stop_trigger*100:.1f}%",
+                    "Min Hold Time": f"{current_profile.min_hold_time}s",
+                    "Cooldown After Loss": f"{current_profile.cooldown_after_loss}s"
+                })
+            
+            with params_col3:
+                st.markdown("**Filters**")
+                st.json({
+                    "Max Spread": f"{current_profile.max_spread*100:.1f}%",
+                    "Spread Multiplier": f"{current_profile.spread_multiplier}x",
+                    "Min ADX Entry": current_profile.min_adx_entry,
+                    "Enable Spread Check": current_profile.enable_spread_check,
+                    "Enable Regime Filter": current_profile.enable_regime_filter,
+                    "Spot Mode for Volatile": current_profile.enable_spot_mode_for_volatile
+                })
+        
+        st.divider()
+        st.markdown("#### 🛠️ Расширенные настройки")
 
-        # Load current YAML for editing
         try:
             with open("strategies.yaml", "r") as f:
                 current_yaml = yaml.safe_load(f)
@@ -763,17 +892,17 @@ with col_main:
             current_yaml = {"strategies": {}}
 
         with st.form("settings_form"):
-            st.markdown("#### 🌍 General Limits (.env)")
+            st.markdown("##### 🌍 General Limits (.env)")
             c1, c2 = st.columns(2)
             new_symbols = c1.text_area("Trading Symbols (JSON list)", value=json.dumps(settings.TRADING_SYMBOLS))
             new_leverage = c2.number_input("Max Leverage (Global Cap)", value=settings.MAX_LEVERAGE, min_value=1.0, max_value=20.0, step=0.5)
             new_daily_loss = c1.number_input("Max Daily Loss ($)", value=settings.MAX_DAILY_LOSS, min_value=1.0)
             new_pos_size = c2.number_input("Max Position Size ($)", value=settings.MAX_POSITION_SIZE, min_value=1.0)
-            new_max_spread = c1.number_input("Max Allowed Spread (%)", value=float(settings.MAX_SPREAD * 100.0), min_value=0.01, max_value=5.0, step=0.01)
+            new_max_spread = c1.number_input("Max Allowed Spread (%)", value=float(settings.MAX_SPREAD * 100.0), min_value=0.01, max_value=50.0, step=0.1)
             new_initial_deposit = c2.number_input("Initial Deposit ($) for Drawdown", value=settings.INITIAL_DEPOSIT)
 
             st.divider()
-            st.markdown("#### 🤖 Strategy Activation (ACTIVE_STRATEGIES)")
+            st.markdown("##### 🤖 Strategy Activation (ACTIVE_STRATEGIES)")
 
             strategy_options = {
                 "Trend Following (GoldenCross)": "GoldenCross",
@@ -792,7 +921,6 @@ with col_main:
                  except:
                      current_active = [s.strip() for s in current_active.split(",")]
 
-            # Normalize current active strategies for display
             reverse_mapping = {
                 "MACD_Trend": "GoldenCross",
                 "GoldenCross": "GoldenCross",
@@ -819,27 +947,22 @@ with col_main:
             new_active_list = [strategy_options[name] for name in selected_display_names]
 
             st.divider()
-            st.markdown("#### 🎯 Strategy Risk Settings (strategies.yaml)")
+            st.markdown("##### 🎯 Strategy Risk Settings (strategies.yaml)")
 
-            # Create a column for each strategy's risk
             strat_keys = ["trend_following", "mean_reversion", "volatility_breakout", "scalping", "bb_squeeze", "grid"]
             new_risks = {}
 
-            # Split into two columns for better layout
             sc1, sc2 = st.columns(2)
             for i, key in enumerate(strat_keys):
                 target_col = sc1 if i % 2 == 0 else sc2
 
-                # Get current risk or default to 0.02
                 strat_data = current_yaml.get("strategies", {}).get(key, {})
                 current_risk = strat_data.get("risk_per_trade", 0.02)
 
                 label = f"{key.replace('_', ' ').title()} Risk (%)"
-                # Use percentage for easier UI (0.02 -> 2.0%)
                 new_risk_pct = target_col.slider(label, 0.1, 20.0, float(current_risk * 100.0), 0.1, help=f"Risk per trade for {key}")
                 new_risks[key] = new_risk_pct / 100.0
 
-            # Special case for DynamicRiskLeverage
             drl_data = current_yaml.get("strategies", {}).get("dynamic_risk_leverage", {})
             drl_max_risk = drl_data.get("max_risk_per_trade", 0.02)
             drl_risk = sc1.slider("DynamicRiskLeverage Max Risk (%)", 0.1, 20.0, float(drl_max_risk * 100.0), 0.1)
@@ -848,7 +971,6 @@ with col_main:
             st.divider()
             submit_col1, submit_col2 = st.columns([1, 1])
             if submit_col1.form_submit_button("💾 Save All Changes"):
-                # 1. Update YAML
                 for key, risk_val in new_risks.items():
                     if key in current_yaml["strategies"]:
                         if key == "dynamic_risk_leverage":
@@ -858,7 +980,6 @@ with col_main:
 
                 yaml_success = save_yaml_config(current_yaml)
 
-                # 2. Update .env
                 env_updates = {
                     "TRADING_SYMBOLS": json.loads(new_symbols),
                     "ACTIVE_STRATEGIES": new_active_list,
@@ -877,7 +998,7 @@ with col_main:
                     st.error("❌ Some changes could not be saved.")
 
         st.divider()
-        st.subheader("Diagnostics")
+        st.subheader("🔧 Diagnostics")
         d_c1, d_c2 = st.columns(2)
         if d_c1.button("Clear Cache"):
             st.cache_data.clear()

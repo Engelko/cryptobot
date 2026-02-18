@@ -12,3 +12,7 @@ tenacity
 typing_extensions
 lightgbm
 joblib
+fastapi
+uvicorn
+requests
+docker

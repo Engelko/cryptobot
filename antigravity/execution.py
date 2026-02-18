@@ -192,7 +192,11 @@ class RealBroker:
     Executes orders on Bybit via API.
     """
     async def _check_liquidity(self, symbol: str, category: str, qty: float) -> bool:
+        from antigravity.profiles import get_current_profile
+        
         client = BybitClient()
+        profile = get_current_profile()
+        
         try:
             ob = await client.get_orderbook(symbol, category)
             bids = ob.get("b", [])
@@ -204,25 +208,36 @@ class RealBroker:
             best_bid = safe_float(bids[0][0])
             best_ask = safe_float(asks[0][0])
             if best_bid <= 0: return False
-            spread = (best_ask - best_bid) / best_bid
+            
+            mid_price = (best_bid + best_ask) / 2
+            spread = (best_ask - best_bid) / mid_price if mid_price > 0 else 0
+            
+            effective_max_spread = profile.max_spread * profile.spread_multiplier
+            
+            if profile.enable_spread_check and spread > effective_max_spread:
+                logger.warning("liquidity_check_failed", symbol=symbol, reason="spread_too_high", 
+                              spread=f"{spread:.4%}", limit=f"{effective_max_spread:.4%}",
+                              profile=profile.name)
+                raise LiquidityRejection(f"Spread too high: {spread:.4%} (limit: {effective_max_spread:.4%}, profile: {profile.name})")
 
-            if spread > settings.MAX_SPREAD:
-                logger.warning("liquidity_check_failed", symbol=symbol, reason="spread_too_high", spread=spread, limit=settings.MAX_SPREAD)
-                raise LiquidityRejection(f"Spread too high: {spread:.4%}")
-
-            # Depth check: Top 3 levels > 2x order size
             depth_bids = sum(safe_float(b[1]) for b in bids[:3])
             depth_asks = sum(safe_float(a[1]) for a in asks[:3])
-
-            if depth_bids < 2 * qty or depth_asks < 2 * qty:
+            
+            min_depth = max(2 * qty, 10)
+            if depth_bids < min_depth or depth_asks < min_depth:
                 logger.warning("liquidity_check_failed", symbol=symbol, reason="insufficient_depth",
-                               depth_bids=depth_bids, depth_asks=depth_asks, required=2*qty)
-                raise LiquidityRejection(f"Insufficient depth: bids={depth_bids:.2f}, asks={depth_asks:.2f}, req={2*qty:.2f}")
+                               depth_bids=depth_bids, depth_asks=depth_asks, required=min_depth)
+                if not profile.is_testnet:
+                    raise LiquidityRejection(f"Insufficient depth: bids={depth_bids:.2f}, asks={depth_asks:.2f}, req={min_depth:.2f}")
 
+            logger.info("liquidity_check_passed", symbol=symbol, spread=f"{spread:.4%}", 
+                       depth_bids=depth_bids, depth_asks=depth_asks)
             return True
+        except LiquidityRejection:
+            raise
         except Exception as e:
             logger.error("liquidity_check_error", error=str(e))
-            return False
+            return profile.is_testnet
         finally:
             await client.close()
 

@@ -51,6 +51,7 @@ class RiskManager:
         self.position_entry_time: Dict[str, float] = {}
         self.trailing_activation_time: Dict[str, float] = {}
         self.pending_quality: Dict[str, int] = {}
+        self._last_loss_time: float = 0.0
 
         # Load persisted state
         state = db.get_risk_state()
@@ -89,12 +90,14 @@ class RiskManager:
 
     async def _handle_trade_closed(self, event: TradeClosedEvent):
         self._check_reset()
-        # Track Net Daily Loss (Losses - Profits)
-        # If event.pnl is positive (profit), it reduces current_daily_loss
-        # If event.pnl is negative (loss), it increases current_daily_loss
         self.current_daily_loss -= event.pnl
         db.update_risk_state(self.current_daily_loss, self.last_reset_date, self.consecutive_loss_days)
         logger.info("risk_pnl_updated", pnl=event.pnl, total_daily_loss=self.current_daily_loss)
+        
+        # Track last loss time for cooldown
+        if event.pnl < 0:
+            self._last_loss_time = time.time()
+            logger.info("loss_recorded", pnl=event.pnl, cooldown_start="now")
 
     async def _handle_order_update(self, event: OrderUpdateEvent):
         """Track positions for local monitoring."""
@@ -133,7 +136,15 @@ class RiskManager:
                         pos["qty"] -= qty
 
     async def _handle_kline(self, event: KlineEvent):
-        """Local monitoring of SL/TS."""
+        """
+        Local monitoring of SL/TS with improved logic.
+        
+        KEY FIXES:
+        1. MIN_HOLD_TIME: Don't trigger SL in first 60 seconds
+        2. TAKE_PROFIT: Auto-close at target profit
+        3. PROFIT_CHECK: Don't trigger SL if position is profitable
+        4. MAX_LOSS_PER_EXIT: Alert if exit loss exceeds threshold
+        """
         symbol = event.symbol
         if symbol not in self.active_positions:
             return
@@ -142,59 +153,125 @@ class RiskManager:
         current_price = event.close
         pos["last_price"] = current_price
         side = pos["side"]
+        entry_price = pos["entry_price"]
+        qty = pos["qty"]
+        entry_time = self.position_entry_time.get(symbol, time.time())
+        hold_time = time.time() - entry_time
 
-        # Level 1: Hard Stop Loss (-2%)
+        # Calculate unrealized PnL
         if side == "Buy":
-            sl_price = pos["entry_price"] * (1 - settings.STOP_LOSS_PCT)
+            unrealized_pnl = (current_price - entry_price) * qty
+            pnl_pct = (current_price - entry_price) / entry_price if entry_price > 0 else 0
+        else:
+            unrealized_pnl = (entry_price - current_price) * qty
+            pnl_pct = (entry_price - current_price) / entry_price if entry_price > 0 else 0
+
+        # FIX 1: Minimum hold time check
+        min_hold_time = getattr(settings, 'MIN_HOLD_TIME', 60)
+        if hold_time < min_hold_time:
+            return
+
+        # FIX 2: Take Profit check (before SL)
+        take_profit_pct = getattr(settings, 'TAKE_PROFIT_PCT', 0.03)
+        if pnl_pct >= take_profit_pct:
+            logger.info("take_profit_triggered", symbol=symbol, pnl_pct=f"{pnl_pct:.2%}", pnl=unrealized_pnl)
+            await self._profit_close(symbol, reason="TAKE_PROFIT")
+            return
+
+        # FIX 3: Don't trigger SL if in profit
+        if unrealized_pnl > 0:
+            return
+
+        # === STOP LOSS LOGIC ===
+        if side == "Buy":
+            sl_price = entry_price * (1 - settings.STOP_LOSS_PCT)
             if current_price <= sl_price:
-                logger.warning("local_sl_triggered", symbol=symbol, price=current_price, sl=sl_price)
+                potential_loss = abs(unrealized_pnl)
+                max_loss_per_exit = getattr(settings, 'MAX_LOSS_PER_EXIT', 5.0)
+                
+                if potential_loss > max_loss_per_exit:
+                    logger.warning("exit_loss_exceeds_max", symbol=symbol, 
+                                  loss=potential_loss, max_allowed=max_loss_per_exit)
+                    await telegram_alerts.send_message(
+                        f"⚠️ <b>Large Exit Loss</b>\n{symbol}: ${potential_loss:.2f} > MAX ${max_loss_per_exit}"
+                    )
+                
+                logger.warning("local_sl_triggered", symbol=symbol, price=current_price, 
+                              sl=sl_price, hold_time=f"{hold_time:.0f}s", loss=potential_loss)
                 await self._emergency_close(symbol)
                 return
 
-            # Update max price for trailing stop
             if current_price > pos["max_price_seen"]:
                 pos["max_price_seen"] = current_price
 
-            # Trailing Stop Trigger
-            profit_pct = (current_price - pos["entry_price"]) / pos["entry_price"]
-            if profit_pct >= settings.TRAILING_STOP_TRIGGER:
+            if pnl_pct >= settings.TRAILING_STOP_TRIGGER:
                 if not pos["trailing_active"]:
                     pos["trailing_active"] = True
                     self.trailing_activation_time[symbol] = time.time()
+                    logger.info("trailing_stop_activated", symbol=symbol, pnl_pct=f"{pnl_pct:.2%}")
 
             if pos["trailing_active"]:
-                # 5-minute delay check after activation
                 if time.time() - self.trailing_activation_time.get(symbol, 0) >= 300:
-                    # Trailing SL from max seen price
                     ts_sl = pos["max_price_seen"] * (1 - settings.TRAILING_STOP_TRIGGER)
                     if current_price <= ts_sl:
                         logger.warning("local_ts_triggered", symbol=symbol, price=current_price, ts_sl=ts_sl)
-                        await self._emergency_close(symbol)
+                        await self._profit_close(symbol, reason="TRAILING_STOP")
+                        return
 
         elif side == "Sell":
-            sl_price = pos["entry_price"] * (1 + settings.STOP_LOSS_PCT)
+            sl_price = entry_price * (1 + settings.STOP_LOSS_PCT)
             if current_price >= sl_price:
-                logger.warning("local_sl_triggered", symbol=symbol, price=current_price, sl=sl_price)
+                potential_loss = abs(unrealized_pnl)
+                max_loss_per_exit = getattr(settings, 'MAX_LOSS_PER_EXIT', 5.0)
+                
+                if potential_loss > max_loss_per_exit:
+                    logger.warning("exit_loss_exceeds_max", symbol=symbol,
+                                  loss=potential_loss, max_allowed=max_loss_per_exit)
+                
+                logger.warning("local_sl_triggered", symbol=symbol, price=current_price,
+                              sl=sl_price, hold_time=f"{hold_time:.0f}s", loss=potential_loss)
                 await self._emergency_close(symbol)
                 return
 
             if current_price < pos["min_price_seen"]:
                 pos["min_price_seen"] = current_price
 
-            # Trailing Stop Trigger
-            profit_pct = (pos["entry_price"] - current_price) / pos["entry_price"]
-            if profit_pct >= settings.TRAILING_STOP_TRIGGER:
+            if pnl_pct >= settings.TRAILING_STOP_TRIGGER:
                 if not pos["trailing_active"]:
                     pos["trailing_active"] = True
                     self.trailing_activation_time[symbol] = time.time()
 
             if pos["trailing_active"]:
-                # 5-minute delay check after activation
                 if time.time() - self.trailing_activation_time.get(symbol, 0) >= 300:
                     ts_sl = pos["min_price_seen"] * (1 + settings.TRAILING_STOP_TRIGGER)
                     if current_price >= ts_sl:
                         logger.warning("local_ts_triggered", symbol=symbol, price=current_price, ts_sl=ts_sl)
-                        await self._emergency_close(symbol)
+                        await self._profit_close(symbol, reason="TRAILING_STOP")
+                        return
+
+    async def _profit_close(self, symbol: str, reason: str = "PROFIT"):
+        """Close position for profit - logs as profitable trade, not emergency."""
+        from antigravity.execution import execution_manager
+        pos = self.active_positions.get(symbol)
+        if not pos:
+            return
+
+        logger.info("profit_close_executing", symbol=symbol, reason=reason, side=pos["side"], qty=pos["qty"])
+        
+        side = "Sell" if pos["side"] == "Buy" else "Buy"
+        signal = Signal(
+            symbol=symbol,
+            type=SignalType.SELL if side == "Sell" else SignalType.BUY,
+            price=0.0,
+            quantity=pos["qty"],
+            reason=reason
+        )
+        await execution_manager.execute(signal, reason)
+        
+        if symbol in self.active_positions:
+            del self.active_positions[symbol]
+            self.position_entry_time.pop(symbol, None)
+            self.trailing_activation_time.pop(symbol, None)
 
     async def _emergency_close(self, symbol: str):
         """Force close position via Market order."""
@@ -296,6 +373,23 @@ class RiskManager:
             logger.warning("risk_block_blacklisted", symbol=signal.symbol, reason="Historical systematic losses")
             return False, f"BLACKLISTED: {signal.symbol} has systematic losses history"
 
+        # 0.5. Session Filter (block American session UTC 16-23)
+        current_hour = datetime.now(timezone.utc).hour
+        session_blacklist = getattr(settings, 'SESSION_BLACKLIST', [16, 17, 18, 19, 20, 21, 22, 23])
+        if current_hour in session_blacklist:
+            logger.info("risk_block_session", hour=current_hour, symbol=signal.symbol, 
+                       reason="American session blocked")
+            return False, f"SESSION_BLOCKED: Hour {current_hour} UTC (American session)"
+
+        # 0.6. Cooldown after loss
+        cooldown_after_loss = getattr(settings, 'COOLDOWN_AFTER_LOSS', 900)
+        if self._last_loss_time > 0:
+            time_since_loss = time.time() - self._last_loss_time
+            if time_since_loss < cooldown_after_loss:
+                remaining = int(cooldown_after_loss - time_since_loss)
+                logger.debug("risk_block_cooldown", remaining_seconds=remaining)
+                return False, f"COOLDOWN: {remaining}s remaining after loss"
+
         # 1. Correlation & Max Positions Check
         active_symbols = [s for s in self.active_positions.keys() if s != signal.symbol]
 
@@ -342,56 +436,87 @@ class RiskManager:
         if await self._is_reduce_only(signal):
             return True, "Reduce-only order accepted"
 
+        from antigravity.profiles import get_current_profile
+        profile = get_current_profile()
+
         balance = await self._get_balance()
         leverage = signal.leverage if signal.leverage and signal.leverage > 0 else 1.0
-        if leverage > settings.MAX_LEVERAGE:
-            leverage = settings.MAX_LEVERAGE
+        max_leverage = min(profile.max_leverage, settings.MAX_LEVERAGE)
+        if leverage > max_leverage:
+            leverage = max_leverage
             signal.leverage = leverage
 
-        daily_loss_left = max(0, settings.MAX_DAILY_LOSS - self.current_daily_loss)
+        daily_loss_left = max(0, profile.max_daily_loss - self.current_daily_loss)
 
-        # Use risk percentage from signal if provided, otherwise default to 2%
-        risk_per_trade = getattr(signal, 'risk_percentage', 0.02)
+        risk_per_trade = getattr(signal, 'risk_percentage', profile.risk_per_trade)
         if risk_per_trade is None or risk_per_trade <= 0:
-            risk_per_trade = 0.02
+            risk_per_trade = profile.risk_per_trade
 
         size_by_pct = balance * risk_per_trade
-        size_by_abs = settings.MAX_POSITION_SIZE
+        size_by_abs = profile.max_position_size
 
-        # Calculate size based on remaining daily loss budget
-        # Formula: Position Size = Max Loss / Stop Loss Percentage
-        risk_size = daily_loss_left / settings.STOP_LOSS_PCT if settings.STOP_LOSS_PCT > 0 else size_by_abs
+        risk_size = daily_loss_left / profile.stop_loss_pct if profile.stop_loss_pct > 0 else size_by_abs
 
         target_size = min(size_by_pct, size_by_abs, risk_size)
 
-        # Check for High Volatility
         regime_data = market_regime_detector.regimes.get(signal.symbol)
         is_volatile = regime_data and regime_data.regime == MarketRegime.VOLATILE
 
-        if self.trading_mode == TradingMode.RECOVERY or is_volatile:
-            # Force Spot and reduce size in recovery or high volatility
-            target_size = min(target_size, balance * 0.20)
-            signal.category = "spot"
-            signal.leverage = 1.0 # No leverage on spot
-            reason = "VOLATILE_REGIME" if is_volatile else "RECOVERY_MODE"
-            logger.info("spot_only_mode_active", reason=reason, symbol=signal.symbol, target_size=target_size)
+        if profile.enable_spot_mode_for_volatile:
+            if self.trading_mode == TradingMode.RECOVERY or is_volatile:
+                target_size = min(target_size, balance * 0.20)
+                signal.category = "spot"
+                signal.leverage = 1.0
+                reason = "VOLATILE_REGIME" if is_volatile else "RECOVERY_MODE"
+                logger.info("spot_only_mode_active", reason=reason, symbol=signal.symbol, target_size=target_size)
 
         if signal.price and signal.price > 0:
+            MIN_REASONABLE_PRICES = {
+                "BTCUSDT": 10000,
+                "ETHUSDT": 1000,
+                "SOLUSDT": 10,
+                "ADAUSDT": 0.1,
+                "DOGEUSDT": 0.01
+            }
+            
+            min_expected_price = MIN_REASONABLE_PRICES.get(signal.symbol, 0.001)
+            if signal.price < min_expected_price * 0.5 or signal.price > min_expected_price * 100:
+                logger.warning("price_anomaly_detected", symbol=signal.symbol, price=signal.price, 
+                              expected_min=min_expected_price * 0.5, expected_max=min_expected_price * 100)
+                if not profile.is_testnet:
+                    return False, f"Price anomaly detected: {signal.price} seems incorrect for {signal.symbol}"
+            
             target_qty = target_size / signal.price
+            
+            MIN_QTY = {
+                "BTCUSDT": 0.001,
+                "ETHUSDT": 0.01,
+                "SOLUSDT": 0.1,
+                "ADAUSDT": 1.0,
+                "DOGEUSDT": 10.0
+            }
+            
+            min_qty = MIN_QTY.get(signal.symbol, 0.01)
+            if target_qty < min_qty:
+                target_qty = min_qty
+                logger.info("qty_adjusted_to_minimum", symbol=signal.symbol, qty=target_qty, min_qty=min_qty)
+            
             if target_size < MIN_ORDER_COST:
                 return False, f"Size too small: ${target_size:.2f} < ${MIN_ORDER_COST}"
             signal.quantity = target_qty
+        else:
+            logger.warning("signal_missing_price", symbol=signal.symbol)
+            return False, f"Signal missing valid price for {signal.symbol}"
 
-        signal.stop_loss = signal.price * (1 - settings.STOP_LOSS_PCT) if signal.type == SignalType.BUY else signal.price * (1 + settings.STOP_LOSS_PCT)
+        signal.stop_loss = signal.price * (1 - profile.stop_loss_pct) if signal.type == SignalType.BUY else signal.price * (1 + profile.stop_loss_pct)
 
-        # Single trade loss check
         if signal.price and signal.price > 0 and signal.quantity and signal.quantity > 0:
             position_value = signal.price * signal.quantity
-            max_loss_amount = position_value * settings.STOP_LOSS_PCT
-            if max_loss_amount > settings.MAX_SINGLE_TRADE_LOSS:
+            max_loss_amount = position_value * profile.stop_loss_pct
+            if max_loss_amount > profile.max_single_trade_loss:
                 logger.warning("risk_block_single_trade_loss", symbol=signal.symbol, 
-                             potential_loss=max_loss_amount, max_allowed=settings.MAX_SINGLE_TRADE_LOSS)
-                return False, f"Potential loss ${max_loss_amount:.2f} exceeds MAX_SINGLE_TRADE_LOSS ${settings.MAX_SINGLE_TRADE_LOSS}"
+                             potential_loss=max_loss_amount, max_allowed=profile.max_single_trade_loss)
+                return False, f"Potential loss ${max_loss_amount:.2f} exceeds MAX_SINGLE_TRADE_LOSS ${profile.max_single_trade_loss}"
 
         return True, signal.reason
 

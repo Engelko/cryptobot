@@ -5,9 +5,12 @@ from antigravity.strategy import BaseStrategy, Signal, SignalType
 from antigravity.event import MarketDataEvent, KlineEvent
 from antigravity.strategies.config import MeanReversionConfig
 from antigravity.regime_detector import market_regime_detector, MarketRegime
+from antigravity.config import settings
 from antigravity.logging import get_logger
 
 logger = get_logger("strategy_mean_rev_improved")
+
+MIN_ADX_ENTRY = 25.0
 
 class BollingerRSIImproved(BaseStrategy):
     """
@@ -45,7 +48,11 @@ class BollingerRSIImproved(BaseStrategy):
             if current_time - self.last_signal_time[symbol] < self.cooldown_seconds:
                 return None
 
-        # Filter 2: ADX Trend Check - Removed/Relaxed as per previous logic
+        # Filter 2: ADX Filter - Block signals in RANGING market (low ADX)
+        min_adx = getattr(settings, 'MIN_ADX_ENTRY', MIN_ADX_ENTRY)
+        if adx_value < min_adx:
+            logger.debug("mean_reversion_adx_block", symbol=symbol, adx=adx_value, min_required=min_adx)
+            return None
 
         signal = None
         if bb_signal == "OVERSOLD" and rsi_value < self.rsi_oversold:
