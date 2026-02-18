@@ -94,6 +94,7 @@ async def get_current():
         }
     }
 
+@app.post("/api/profileswitch")
 @app.post("/api/profile/switch")
 async def switch_profile(request: ProfileSwitchRequest):
     if request.profile not in PROFILES:
@@ -136,7 +137,7 @@ async def delayed_restart():
     logger.info("executing_restart")
     if docker_client:
         try:
-            for container_name in ["antigravity-engine", "antigravity-dashboard", "antigravity-optimizer"]:
+            for container_name in ["antigravity-engine", "antigravity-dashboard", "antigravity-optimizer", "antigravity-ai-agent"]:
                 try:
                     container = docker_client.containers.get(container_name)
                     container.restart()
@@ -180,6 +181,7 @@ async def update_custom_settings(request: CustomSettingsRequest):
         "message": f"Settings updated: {', '.join(updates)}"
     }
 
+@app.post("/api/botrestart")
 @app.post("/api/bot/restart")
 async def restart_bot():
     try:

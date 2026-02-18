@@ -121,6 +121,7 @@ PROFILES: Dict[str, TradingProfile] = {
 }
 
 PROFILE_FILE = "storage/current_profile.json"
+OVERRIDE_FILE = "storage/profile_overrides.json"
 
 _current_profile: Optional[TradingProfile] = None
 
@@ -130,21 +131,46 @@ def get_current_profile() -> TradingProfile:
         _current_profile = load_profile()
     return _current_profile
 
+def load_overrides() -> Dict[str, Any]:
+    if os.path.exists(OVERRIDE_FILE):
+        try:
+            with open(OVERRIDE_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error("overrides_load_error", error=str(e))
+    return {}
+
 def load_profile() -> TradingProfile:
+    profile_name = "testnet"
     if os.path.exists(PROFILE_FILE):
         try:
             with open(PROFILE_FILE, "r") as f:
                 data = json.load(f)
                 profile_name = data.get("profile", "testnet")
-                if profile_name in PROFILES:
-                    logger.info("profile_loaded", profile=profile_name)
-                    return PROFILES[profile_name]
         except Exception as e:
             logger.error("profile_load_error", error=str(e))
+            profile_name = "testnet" if os.getenv("BYBIT_TESTNET", "True").lower() == "true" else "mainnet_conservative"
+    else:
+        profile_name = "testnet" if os.getenv("BYBIT_TESTNET", "True").lower() == "true" else "mainnet_conservative"
+
+    if profile_name not in PROFILES:
+        profile_name = "testnet"
+
+    profile = PROFILES[profile_name]
+    logger.info("profile_loaded", profile=profile_name)
+
+    # Apply Overrides
+    overrides = load_overrides()
+    if overrides:
+        # Create a copy to avoid mutating the global PROFILES dict
+        import copy
+        profile = copy.deepcopy(profile)
+        for key, value in overrides.items():
+            if value is not None and hasattr(profile, key):
+                setattr(profile, key, value)
+                logger.info("profile_override_applied", key=key, value=value)
     
-    profile_name = "testnet" if os.getenv("BYBIT_TESTNET", "True").lower() == "true" else "mainnet_conservative"
-    logger.info("profile_default", profile=profile_name)
-    return PROFILES[profile_name]
+    return profile
 
 def save_profile(profile_name: str) -> bool:
     global _current_profile

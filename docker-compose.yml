@@ -96,6 +96,25 @@ services:
       retries: 3
       start_period: 30s
 
+  ai-agent:
+    build: .
+    container_name: antigravity-ai-agent
+    command: python ai_agent_service.py
+    volumes:
+      - ./storage:/app/storage
+      - ./.env:/app/.env
+      - ./strategies.yaml:/app/strategies.yaml
+      - ./antigravity:/app/antigravity
+      - ./AI_AGENT_SPEC.md:/app/AI_AGENT_SPEC.md
+      - ./ai_agent_service.py:/app/ai_agent_service.py
+    environment:
+      - TZ=Europe/Moscow
+      - DATABASE_URL=sqlite:///storage/data.db
+      - SETTINGS_API_URL=http://settings-api:8080
+    restart: unless-stopped
+    networks:
+      - antigravity-net
+
 networks:
   antigravity-net:
     driver: bridge

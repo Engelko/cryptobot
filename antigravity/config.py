@@ -19,19 +19,19 @@ class Settings(BaseSettings):
     BYBIT_TESTNET: bool = Field(True, description="Use Testnet if True")
 
     # Trading Configuration
-    TRADING_SYMBOLS: Union[List[str], str] = Field(default=["BTCUSDT"], description="List of symbols to trade")
-    ACTIVE_STRATEGIES: Union[List[str], str] = Field(default=["MACD_Trend", "RSI_Reversion"], description="List of active strategies")
+    TRADING_SYMBOLS: Union[List[str], str] = Field(default=["BTCUSDT"], validation_alias="TRADINGSYMBOLS", description="List of symbols to trade")
+    ACTIVE_STRATEGIES: Union[List[str], str] = Field(default=["MACD_Trend", "RSI_Reversion"], validation_alias="ACTIVESTRATEGIES", description="List of active strategies")
 
     # System Configuration
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     ENVIRONMENT: Literal["development", "production"] = "development"
 
     # Risk Management - Core
-    MAX_DAILY_LOSS: float = Field(30.0, gt=0, description="Max daily loss in USDT")
-    MAX_POSITION_SIZE: float = Field(50.0, gt=0, description="Max position size in USDT")
-    MAX_SINGLE_TRADE_LOSS: float = Field(15.0, gt=0, description="Max loss per single trade in USDT")
+    MAX_DAILY_LOSS: float = Field(30.0, gt=0, validation_alias="MAXDAILYLOSS", description="Max daily loss in USDT")
+    MAX_POSITION_SIZE: float = Field(50.0, gt=0, validation_alias="MAXPOSITIONSIZE", description="Max position size in USDT")
+    MAX_SINGLE_TRADE_LOSS: float = Field(15.0, gt=0, validation_alias="MAXSINGLETRADELOSS", description="Max loss per single trade in USDT")
     MAX_LOSS_PER_EXIT: float = Field(5.0, gt=0, description="Max loss per emergency exit in USDT")
-    MAX_LEVERAGE: float = Field(2.0, gt=0, description="Max leverage")
+    MAX_LEVERAGE: float = Field(2.0, gt=0, validation_alias="MAXLEVERAGE", description="Max leverage")
     DYNAMIC_LEVERAGE_ENABLED: bool = Field(False, description="Allow strategy-specified leverage above max")
     MAX_SPREAD: float = Field(0.001, description="Max allowed spread for liquidity check")
     
