@@ -141,35 +141,33 @@ def load_overrides() -> Dict[str, Any]:
     return {}
 
 def load_profile() -> TradingProfile:
-    profile_name = "testnet"
+    profile = None
     if os.path.exists(PROFILE_FILE):
         try:
             with open(PROFILE_FILE, "r") as f:
                 data = json.load(f)
                 profile_name = data.get("profile", "testnet")
+                if profile_name in PROFILES:
+                    logger.info("profile_loaded", profile=profile_name)
+                    profile = PROFILES[profile_name]
         except Exception as e:
             logger.error("profile_load_error", error=str(e))
-            profile_name = "testnet" if os.getenv("BYBIT_TESTNET", "True").lower() == "true" else "mainnet_conservative"
-    else:
+
+    if profile is None:
         profile_name = "testnet" if os.getenv("BYBIT_TESTNET", "True").lower() == "true" else "mainnet_conservative"
-
-    if profile_name not in PROFILES:
-        profile_name = "testnet"
-
-    profile = PROFILES[profile_name]
-    logger.info("profile_loaded", profile=profile_name)
+        logger.info("profile_default", profile=profile_name)
+        profile = PROFILES[profile_name]
 
     # Apply Overrides
     overrides = load_overrides()
     if overrides:
-        # Create a copy to avoid mutating the global PROFILES dict
         import copy
         profile = copy.deepcopy(profile)
         for key, value in overrides.items():
             if value is not None and hasattr(profile, key):
                 setattr(profile, key, value)
                 logger.info("profile_override_applied", key=key, value=value)
-    
+
     return profile
 
 def save_profile(profile_name: str) -> bool:
@@ -184,7 +182,9 @@ def save_profile(profile_name: str) -> bool:
         with open(PROFILE_FILE, "w") as f:
             json.dump({"profile": profile_name}, f)
         
-        _current_profile = PROFILES[profile_name]
+        _current_profile = None # Force reload
+        get_current_profile()
+
         logger.info("profile_saved", profile=profile_name)
         return True
     except Exception as e:

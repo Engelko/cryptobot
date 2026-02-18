@@ -38,12 +38,10 @@ class LLMClient:
             "temperature": kwargs.get("temperature", self.temperature)
         }
 
-        # Merge extra kwargs
         for key, val in self.extra_kwargs.items():
             if key not in ["timeout"]:
                 payload[key] = val
 
-        # Override with per-call kwargs
         for key, val in kwargs.items():
             if key not in ["max_tokens", "temperature"]:
                 payload[key] = val

@@ -11,6 +11,7 @@ from dotenv import set_key
 from antigravity.ai_client_generic import LLMClient
 from antigravity.logging import configure_logging, get_logger
 from antigravity.config import settings
+from antigravity.profiles import apply_profile_to_settings
 
 # Configure logging for the service
 configure_logging()
@@ -79,30 +80,35 @@ class AIAgentService:
 
             # Market Snapshot
             market_snapshot = {}
-            cursor.execute("SELECT symbol, regime, adx, volatility FROM market_regime")
-            for row in cursor.fetchall():
-                market_snapshot[row['symbol']] = {
-                    "regime": row['regime'],
-                    "adx": row['adx'],
-                    "volatility": row['volatility']
-                }
+            # Verify klines table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='klines'")
+            if not cursor.fetchone():
+                logger.warning("klines_table_not_found_skipping_market_snapshot")
+            else:
+                cursor.execute("SELECT symbol, regime, adx, volatility FROM market_regime")
+                for row in cursor.fetchall():
+                    market_snapshot[row['symbol']] = {
+                        "regime": row['regime'],
+                        "adx": row['adx'],
+                        "volatility": row['volatility']
+                    }
 
-            # Latest prices and changes
-            for symbol in market_snapshot:
-                cursor.execute("SELECT close FROM klines WHERE symbol = ? ORDER BY ts DESC LIMIT 2", (symbol,))
-                rows = cursor.fetchall()
-                if len(rows) >= 1:
-                    market_snapshot[symbol]["price"] = rows[0][0]
-                if len(rows) >= 2:
-                    change = ((rows[0][0] - rows[1][0]) / rows[1][0]) * 100
-                    market_snapshot[symbol]["change_24h_approx"] = change
+                # Latest prices and changes
+                for symbol in market_snapshot:
+                    cursor.execute("SELECT close FROM klines WHERE symbol = ? ORDER BY ts DESC LIMIT 2", (symbol,))
+                    rows = rows = cursor.fetchall()
+                    if len(rows) >= 1:
+                        market_snapshot[symbol]["price"] = rows[0][0]
+                    if len(rows) >= 2:
+                        change = ((rows[0][0] - rows[1][0]) / rows[1][0]) * 100
+                        market_snapshot[symbol]["change_24h_approx"] = change
 
-                # Simple S/R
-                cursor.execute("SELECT MIN(low), MAX(high) FROM klines WHERE symbol = ? AND created_at > ?", (symbol, since_date))
-                sr_row = cursor.fetchone()
-                if sr_row:
-                    market_snapshot[symbol]["support"] = sr_row[0]
-                    market_snapshot[symbol]["resistance"] = sr_row[1]
+                    # Simple S/R
+                    cursor.execute("SELECT MIN(low), MAX(high) FROM klines WHERE symbol = ? AND created_at > ?", (symbol, since_date))
+                    sr_row = cursor.fetchone()
+                    if sr_row:
+                        market_snapshot[symbol]["support"] = sr_row[0]
+                        market_snapshot[symbol]["resistance"] = sr_row[1]
 
             # Strategy Stats
             strategy_stats = {}
@@ -134,10 +140,11 @@ class AIAgentService:
             current_profile_name = "testnet"
             if os.path.exists(self.profile_file):
                 with open(self.profile_file, "r") as f:
-                    current_profile_name = json.load(f).get("profile", "testnet")
+                    try:
+                        current_profile_name = json.load(f).get("profile", "testnet")
+                    except:
+                        pass
 
-            # Load profile params (simple version from profiles.py content or config)
-            # For simplicity, we'll just send the name and what we have in settings
             risk_profile = {
                 "name": current_profile_name,
                 "max_daily_loss": settings.MAX_DAILY_LOSS,
@@ -155,7 +162,7 @@ class AIAgentService:
                 "market_snapshot": market_snapshot,
                 "strategy_stats": strategy_stats,
                 "risk_profile": risk_profile,
-                "recent_issues": [], # Can be populated if needed
+                "recent_issues": [],
                 "constraints": {
                     "allow_profile_switch": True,
                     "allow_risk_tuning": True,
@@ -183,7 +190,6 @@ class AIAgentService:
             return None
 
         try:
-            # Clean up response text in case of markdown
             cleaned_text = response_text.strip()
             if cleaned_text.startswith("```json"):
                 cleaned_text = cleaned_text.split("```json")[1].split("```")[0].strip()
@@ -196,15 +202,11 @@ class AIAgentService:
             return None
 
     def get_system_prompt(self) -> str:
-        # We'll load it from AI_AGENT_SPEC.md or a constant
         if os.path.exists("AI_AGENT_SPEC.md"):
             with open("AI_AGENT_SPEC.md", "r") as f:
                 content = f.read()
-                # Extract BLOCK B
                 if "BLOCK B" in content:
                     return content.split("BLOCK B")[1].split("====")[0].strip()
-
-        # Fallback to a minimal version if file doesn't exist yet
         return "You are an AI crypto market analyst. Propose config changes in JSON format."
 
     async def apply_configuration(self, plan: Dict[str, Any]):
@@ -218,7 +220,6 @@ class AIAgentService:
         target_profile = plan.get("target_profile")
         if target_profile:
             logger.info("switching_profile", target=target_profile)
-            # Use Settings API to switch profile
             try:
                 resp = requests.post(f"{self.settings_api_url}/api/profileswitch",
                                     json={"profile": target_profile, "restart": False})
@@ -241,20 +242,19 @@ class AIAgentService:
                 "maxleverage": "max_leverage",
                 "riskpertrade": "risk_per_trade"
             }
-            # Filter out nulls and apply safety caps
             clean_overrides = {}
             for k, v in risk_overrides.items():
                 if v is not None:
                     param_name = risk_param_map.get(k.lower(), k)
                     # SAFETY CAPS
                     if param_name == "risk_per_trade":
-                         v = min(v, 0.05) # 5% max
+                         v = min(v, 0.05)
                     if param_name == "max_leverage":
                          v = min(v, settings.MAX_LEVERAGE)
-
                     clean_overrides[param_name] = v
 
             if clean_overrides:
+                os.makedirs(os.path.dirname(self.override_file), exist_ok=True)
                 with open(self.override_file, "w") as f:
                     json.dump(clean_overrides, f, indent=2)
                 logger.info("risk_overrides_applied", overrides=clean_overrides)
@@ -268,20 +268,12 @@ class AIAgentService:
                     config = yaml.safe_load(f)
 
                 active_strategies = []
-
-                # We need a mapping from AI names to YAML keys
-                # GoldenCross -> trend_following
-                # BollingerRSI -> mean_reversion
-                # BBSqueeze -> bb_squeeze
-                # DynamicRiskLeverage -> dynamic_risk_leverage
                 name_map = {
                     "GoldenCross": "trend_following",
                     "BollingerRSI": "mean_reversion",
                     "BBSqueeze": "bb_squeeze",
                     "DynamicRiskLeverage": "dynamic_risk_leverage"
                 }
-
-                # Parameter mapping from AI naming (sometimes no underscores) to YAML naming
                 param_map = {
                     "fastperiod": "fast_period",
                     "slowperiod": "slow_period",
@@ -298,44 +290,32 @@ class AIAgentService:
                     yaml_key = name_map.get(name)
                     if yaml_key and yaml_key in config['strategies']:
                         strat_cfg = config['strategies'][yaml_key]
-
-                        # Update enabled
                         if "enabled" in item:
                             strat_cfg["enabled"] = item["enabled"]
-
-                        # Update params
                         updates = item.get("param_updates", {})
                         for pk, pv in updates.items():
                             if pv is not None:
                                 yaml_pk = param_map.get(pk.lower(), pk)
-
-                                # Safety caps for riskpertrade/leverage
                                 if yaml_pk == "risk_per_trade":
                                     pv = min(pv, 0.05)
                                 if yaml_pk == "leverage":
                                     pv = min(pv, settings.MAX_LEVERAGE)
-
                                 if yaml_pk in strat_cfg:
                                     strat_cfg[yaml_pk] = pv
                                 else:
                                     logger.warning("unknown_strategy_param", strategy=name, param=pk)
-
                         if strat_cfg.get("enabled"):
                             active_strategies.append(name)
-
                         strategies_changed = True
 
                 if strategies_changed:
                     with open(self.strategies_yaml, "w") as f:
                         yaml.dump(config, f, sort_keys=False)
                     logger.info("strategies_yaml_updated")
-
-                    # Update ACTIVESTRATEGIES in .env
                     if active_strategies:
                         self.update_env("ACTIVESTRATEGIES", ",".join(active_strategies))
                         env_changed = True
 
-        # 4. Restart Bot if anything changed
         if profile_changed or strategies_changed or env_changed:
             logger.info("triggering_bot_restart")
             try:
@@ -345,11 +325,9 @@ class AIAgentService:
 
     def update_env(self, key: str, value: str):
         try:
-            # Ensure file exists
             if not os.path.exists(self.env_file):
                 with open(self.env_file, "w") as f:
                     pass
-
             set_key(self.env_file, key, value, quote_mode="never")
             logger.info("env_updated", key=key)
         except Exception as e:
@@ -361,10 +339,15 @@ class AIAgentService:
                 await self.run_once()
             except Exception as e:
                 logger.error("loop_error", error=str(e))
-
             logger.info("sleeping_until_next_run", hours=self.interval_hours)
             await asyncio.sleep(self.interval_hours * 3600)
 
 if __name__ == "__main__":
+    # Ensure settings are synced with current profile
+    try:
+        apply_profile_to_settings()
+    except Exception as e:
+        logger.error("settings_sync_failed", error=str(e))
+
     service = AIAgentService()
     asyncio.run(service.main_loop())
