@@ -508,7 +508,13 @@ class RiskManager:
             logger.warning("signal_missing_price", symbol=signal.symbol)
             return False, f"Signal missing valid price for {signal.symbol}"
 
-        signal.stop_loss = signal.price * (1 - profile.stop_loss_pct) if signal.type == SignalType.BUY else signal.price * (1 + profile.stop_loss_pct)
+        # Only set stop_loss if not already set by strategy
+        # Strategies like GoldenCross set their own SL based on ATR
+        if not hasattr(signal, 'stop_loss') or signal.stop_loss is None or signal.stop_loss <= 0:
+            signal.stop_loss = signal.price * (1 - profile.stop_loss_pct) if signal.type == SignalType.BUY else signal.price * (1 + profile.stop_loss_pct)
+            logger.debug("stop_loss_set_by_risk_manager", symbol=signal.symbol, stop_loss=signal.stop_loss, source="risk_manager")
+        else:
+            logger.debug("stop_loss_preserved_from_strategy", symbol=signal.symbol, stop_loss=signal.stop_loss, source="strategy")
 
         if signal.price and signal.price > 0 and signal.quantity and signal.quantity > 0:
             position_value = signal.price * signal.quantity

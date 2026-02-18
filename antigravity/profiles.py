@@ -37,21 +37,21 @@ class TradingProfile:
 PROFILES: Dict[str, TradingProfile] = {
     "testnet": TradingProfile(
         name="Testnet",
-        description="Для тестирования на Bybit Testnet. Ослабленные фильтры, больший спред.",
+        description="Для тестирования на Bybit Testnet. Tighter SL, wider TP, session filter.",
         is_testnet=True,
         
         max_spread=0.10,
         max_leverage=2.0,
         max_daily_loss=100.0,
         max_position_size=100.0,
-        max_single_trade_loss=30.0,
-        stop_loss_pct=0.03,
-        take_profit_pct=0.04,
-        trailing_stop_trigger=0.03,
+        max_single_trade_loss=15.0,
+        stop_loss_pct=0.02,
+        take_profit_pct=0.06,
+        trailing_stop_trigger=0.025,
         min_hold_time=30,
         cooldown_after_loss=300,
         
-        session_blacklist=[],
+        session_blacklist=[16, 17, 18, 19, 20, 21, 22, 23],
         min_adx_entry=15.0,
         max_atr_pct=0.10,
         
@@ -60,62 +60,62 @@ PROFILES: Dict[str, TradingProfile] = {
         enable_spot_mode_for_volatile=False,
         enable_regime_filter=False,
         
-        risk_per_trade=0.02
+        risk_per_trade=0.01
     ),
     
     "mainnet_conservative": TradingProfile(
         name="Mainnet Conservative",
-        description="Для реальной торговли с минимальным риском. Строгие фильтры.",
+        description="Для реальной торговли. Tight SL 2%, wide TP 6%, strict filters.",
         is_testnet=False,
-        
+
         max_spread=0.001,
         max_leverage=1.5,
         max_daily_loss=20.0,
         max_position_size=30.0,
         max_single_trade_loss=10.0,
         stop_loss_pct=0.02,
-        take_profit_pct=0.03,
+        take_profit_pct=0.06,
         trailing_stop_trigger=0.025,
         min_hold_time=60,
         cooldown_after_loss=900,
-        
+
         session_blacklist=[16, 17, 18, 19, 20, 21, 22, 23],
         min_adx_entry=25.0,
         max_atr_pct=0.05,
-        
+
         enable_spread_check=True,
         spread_multiplier=1.0,
         enable_spot_mode_for_volatile=True,
         enable_regime_filter=True,
-        
+
         risk_per_trade=0.01
     ),
     
     "mainnet_aggressive": TradingProfile(
         name="Mainnet Aggressive",
-        description="Для реальной торговли с повышенным риском. Больше сделок.",
+        description="Для реальной торговли. Higher risk but still tight SL 2.5%, TP 6%.",
         is_testnet=False,
-        
+
         max_spread=0.002,
         max_leverage=3.0,
         max_daily_loss=50.0,
         max_position_size=75.0,
-        max_single_trade_loss=20.0,
+        max_single_trade_loss=15.0,
         stop_loss_pct=0.025,
-        take_profit_pct=0.04,
+        take_profit_pct=0.06,
         trailing_stop_trigger=0.03,
         min_hold_time=45,
         cooldown_after_loss=600,
-        
-        session_blacklist=[18, 19, 20, 21],
+
+        session_blacklist=[17, 18, 19, 20, 21, 22],
         min_adx_entry=20.0,
         max_atr_pct=0.07,
-        
+
         enable_spread_check=True,
         spread_multiplier=1.0,
         enable_spot_mode_for_volatile=True,
         enable_regime_filter=True,
-        
+
         risk_per_trade=0.015
     )
 }

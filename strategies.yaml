@@ -58,7 +58,7 @@ strategies:
     risk_per_trade: 0.02
     rsi_overbought: 65
     rsi_oversold: 25
-    rsi_period: 10
+    rsi_period: 14
   scalping:
     d_period: 3
     enabled: false
@@ -73,7 +73,7 @@ strategies:
     fast_period: 8
     leverage: 1.0
     name: GoldenCross
-    risk_per_trade: 0.02
+    risk_per_trade: 0.01
     slow_period: 40
   volatility_breakout:
     atr_period: 14
