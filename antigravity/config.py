@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, AliasChoices
 from typing import Literal, List, Union
 import json
 
@@ -19,19 +19,19 @@ class Settings(BaseSettings):
     BYBIT_TESTNET: bool = Field(True, description="Use Testnet if True")
 
     # Trading Configuration
-    TRADING_SYMBOLS: Union[List[str], str] = Field(default=["BTCUSDT"], description="List of symbols to trade")
-    ACTIVE_STRATEGIES: Union[List[str], str] = Field(default=["MACD_Trend", "RSI_Reversion"], description="List of active strategies")
+    TRADING_SYMBOLS: Union[List[str], str] = Field(default=["BTCUSDT"], validation_alias=AliasChoices("TRADINGSYMBOLS", "TRADING_SYMBOLS"), description="List of symbols to trade")
+    ACTIVE_STRATEGIES: Union[List[str], str] = Field(default=["MACD_Trend", "RSI_Reversion"], validation_alias=AliasChoices("ACTIVESTRATEGIES", "ACTIVE_STRATEGIES"), description="List of active strategies")
 
     # System Configuration
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     ENVIRONMENT: Literal["development", "production"] = "development"
 
     # Risk Management - Core
-    MAX_DAILY_LOSS: float = Field(30.0, gt=0, description="Max daily loss in USDT")
-    MAX_POSITION_SIZE: float = Field(50.0, gt=0, description="Max position size in USDT")
-    MAX_SINGLE_TRADE_LOSS: float = Field(15.0, gt=0, description="Max loss per single trade in USDT")
+    MAX_DAILY_LOSS: float = Field(50.0, gt=0, validation_alias=AliasChoices("MAXDAILYLOSS", "MAX_DAILY_LOSS"), description="Max daily loss in USDT")
+    MAX_POSITION_SIZE: float = Field(100.0, gt=0, validation_alias=AliasChoices("MAXPOSITIONSIZE", "MAX_POSITION_SIZE"), description="Max position size in USDT")
+    MAX_SINGLE_TRADE_LOSS: float = Field(30.0, gt=0, validation_alias=AliasChoices("MAXSINGLETRADELOSS", "MAX_SINGLE_TRADE_LOSS"), description="Max loss per single trade in USDT")
     MAX_LOSS_PER_EXIT: float = Field(5.0, gt=0, description="Max loss per emergency exit in USDT")
-    MAX_LEVERAGE: float = Field(2.0, gt=0, description="Max leverage")
+    MAX_LEVERAGE: float = Field(3.0, gt=0, validation_alias=AliasChoices("MAXLEVERAGE", "MAX_LEVERAGE"), description="Max leverage")
     DYNAMIC_LEVERAGE_ENABLED: bool = Field(False, description="Allow strategy-specified leverage above max")
     MAX_SPREAD: float = Field(0.001, description="Max allowed spread for liquidity check")
     
@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     
     # Market Filters
     SESSION_BLACKLIST: Union[List[int], str] = Field(default=[16,17,18,19,20,21,22,23], description="UTC hours to block trading (American session)")
-    MIN_ADX_ENTRY: float = Field(25.0, gt=0, description="Minimum ADX for entry signals")
+    MIN_ADX_ENTRY: float = Field(15.0, gt=0, description="Minimum ADX for entry signals")
     MAX_ATR_PCT: float = Field(0.05, gt=0, description="Max ATR as percentage of price")
 
     # AI / LLM Configuration

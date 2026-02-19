@@ -48,11 +48,7 @@ class BollingerRSIImproved(BaseStrategy):
             if current_time - self.last_signal_time[symbol] < self.cooldown_seconds:
                 return None
 
-        # Filter 2: ADX Filter - Block signals in RANGING market (low ADX)
-        min_adx = getattr(settings, 'MIN_ADX_ENTRY', MIN_ADX_ENTRY)
-        if adx_value < min_adx:
-            logger.debug("mean_reversion_adx_block", symbol=symbol, adx=adx_value, min_required=min_adx)
-            return None
+        # Filter 2: ADX Filter - Removed (MR works well in ranging markets)
 
         signal = None
         if bb_signal == "OVERSOLD" and rsi_value < self.rsi_oversold:
