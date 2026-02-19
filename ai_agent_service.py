@@ -24,6 +24,7 @@ class AIAgentService:
         self.env_file = ".env"
         self.profile_file = "storage/current_profile.json"
         self.override_file = "storage/profile_overrides.json"
+        self.state_file = "storage/ai_agent_state.json"
         self.settings_api_url = os.getenv("SETTINGS_API_URL", "http://settings-api:8080")
 
         self.interval_hours = int(os.getenv("AI_AGENT_INTERVAL_HOURS", "12"))
@@ -96,7 +97,7 @@ class AIAgentService:
                 # Latest prices and changes
                 for symbol in market_snapshot:
                     cursor.execute("SELECT close FROM klines WHERE symbol = ? ORDER BY ts DESC LIMIT 2", (symbol,))
-                    rows = rows = cursor.fetchall()
+                    rows = cursor.fetchall()
                     if len(rows) >= 1:
                         market_snapshot[symbol]["price"] = rows[0][0]
                     if len(rows) >= 2:
@@ -333,14 +334,40 @@ class AIAgentService:
         except Exception as e:
             logger.error("env_update_error", key=key, error=str(e))
 
+    def _get_last_run(self) -> float:
+        if os.path.exists(self.state_file):
+            try:
+                with open(self.state_file, "r") as f:
+                    return json.load(f).get("last_run", 0.0)
+            except:
+                pass
+        return 0.0
+
+    def _save_last_run(self):
+        try:
+            os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
+            with open(self.state_file, "w") as f:
+                json.dump({"last_run": time.time()}, f)
+        except Exception as e:
+            logger.error("save_state_error", error=str(e))
+
     async def main_loop(self):
         while True:
             try:
+                last_run = self._get_last_run()
+                now = time.time()
+                wait_time = (self.interval_hours * 3600) - (now - last_run)
+
+                if wait_time > 0:
+                    logger.info("sleeping_until_scheduled_run",
+                                remaining_minutes=round(wait_time / 60, 1))
+                    await asyncio.sleep(wait_time)
+
                 await self.run_once()
+                self._save_last_run()
             except Exception as e:
                 logger.error("loop_error", error=str(e))
-            logger.info("sleeping_until_next_run", hours=self.interval_hours)
-            await asyncio.sleep(self.interval_hours * 3600)
+                await asyncio.sleep(60) # Wait a bit on error
 
 if __name__ == "__main__":
     # Ensure settings are synced with current profile
