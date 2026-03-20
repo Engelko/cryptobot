@@ -16,3 +16,4 @@ fastapi
 uvicorn
 requests
 docker
+python-dotenv

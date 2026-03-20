@@ -41,10 +41,10 @@ PROFILES: Dict[str, TradingProfile] = {
         is_testnet=True,
         
         max_spread=0.10,
-        max_leverage=2.0,
+        max_leverage=3.0,
         max_daily_loss=100.0,
         max_position_size=100.0,
-        max_single_trade_loss=15.0,
+        max_single_trade_loss=30.0,
         stop_loss_pct=0.02,
         take_profit_pct=0.06,
         trailing_stop_trigger=0.025,
@@ -57,10 +57,10 @@ PROFILES: Dict[str, TradingProfile] = {
         
         enable_spread_check=True,
         spread_multiplier=10.0,
-        enable_spot_mode_for_volatile=False,
-        enable_regime_filter=False,
+        enable_spot_mode_for_volatile=True,
+        enable_regime_filter=True,
         
-        risk_per_trade=0.01
+        risk_per_trade=0.02
     ),
     
     "mainnet_conservative": TradingProfile(
@@ -121,6 +121,7 @@ PROFILES: Dict[str, TradingProfile] = {
 }
 
 PROFILE_FILE = "storage/current_profile.json"
+OVERRIDE_FILE = "storage/profile_overrides.json"
 
 _current_profile: Optional[TradingProfile] = None
 
@@ -130,7 +131,17 @@ def get_current_profile() -> TradingProfile:
         _current_profile = load_profile()
     return _current_profile
 
+def load_overrides() -> Dict[str, Any]:
+    if os.path.exists(OVERRIDE_FILE):
+        try:
+            with open(OVERRIDE_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error("overrides_load_error", error=str(e))
+    return {}
+
 def load_profile() -> TradingProfile:
+    profile = None
     if os.path.exists(PROFILE_FILE):
         try:
             with open(PROFILE_FILE, "r") as f:
@@ -138,13 +149,26 @@ def load_profile() -> TradingProfile:
                 profile_name = data.get("profile", "testnet")
                 if profile_name in PROFILES:
                     logger.info("profile_loaded", profile=profile_name)
-                    return PROFILES[profile_name]
+                    profile = PROFILES[profile_name]
         except Exception as e:
             logger.error("profile_load_error", error=str(e))
-    
-    profile_name = "testnet" if os.getenv("BYBIT_TESTNET", "True").lower() == "true" else "mainnet_conservative"
-    logger.info("profile_default", profile=profile_name)
-    return PROFILES[profile_name]
+
+    if profile is None:
+        profile_name = "testnet" if os.getenv("BYBIT_TESTNET", "True").lower() == "true" else "mainnet_conservative"
+        logger.info("profile_default", profile=profile_name)
+        profile = PROFILES[profile_name]
+
+    # Apply Overrides
+    overrides = load_overrides()
+    if overrides:
+        import copy
+        profile = copy.deepcopy(profile)
+        for key, value in overrides.items():
+            if value is not None and hasattr(profile, key):
+                setattr(profile, key, value)
+                logger.info("profile_override_applied", key=key, value=value)
+
+    return profile
 
 def save_profile(profile_name: str) -> bool:
     global _current_profile
@@ -158,7 +182,9 @@ def save_profile(profile_name: str) -> bool:
         with open(PROFILE_FILE, "w") as f:
             json.dump({"profile": profile_name}, f)
         
-        _current_profile = PROFILES[profile_name]
+        _current_profile = None # Force reload
+        get_current_profile()
+
         logger.info("profile_saved", profile=profile_name)
         return True
     except Exception as e:
