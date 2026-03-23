@@ -57,8 +57,8 @@ strategies:
     name: BollingerRSI
     risk_per_trade: 0.02
     rsi_overbought: 65
-    rsi_oversold: 25
-    rsi_period: 14
+    rsi_oversold: 35
+    rsi_period: 10
   scalping:
     d_period: 3
     enabled: false
@@ -74,7 +74,7 @@ strategies:
     leverage: 1.0
     name: GoldenCross
     risk_per_trade: 0.01
-    slow_period: 40
+    slow_period: 100
   volatility_breakout:
     atr_period: 14
     enabled: false

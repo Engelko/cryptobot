@@ -59,19 +59,6 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = Field(default="", description="API Key for LLM Provider")
     LLM_BASE_URL: str = Field(default="https://api.deepseek.com/v1", description="Base URL for LLM API")
     LLM_MODEL: str = Field(default="deepseek-chat", description="Model Name")
-    
-    # AI Provider Selection
-    AI_PROVIDER: Literal["deepseek", "alibaba", "openai"] = Field(default="deepseek", description="AI Provider: deepseek, alibaba, or openai")
-    
-    # Alibaba Model Studio Configuration
-    ALIBABA_API_KEY: str = Field(default="", description="Alibaba Model Studio API Key")
-    ALIBABA_BASE_URL: str = Field(default="https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1", description="Alibaba API Base URL")
-    ALIBABA_MODEL: str = Field(default="qwen3.5-plus", description="Default Alibaba Model")
-    ALIBABA_AVAILABLE_MODELS: Union[List[str], str] = Field(
-        default=["qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", 
-                 "qwen3-coder-plus", "MiniMax-M2.5", "glm-5", "glm-4.7", "kimi-k2.5"],
-        description="Available Alibaba models for selection"
-    )
 
     # Simulation Mode
     SIMULATION_MODE: bool = Field(False, description="Enable Paper Trading")
@@ -116,13 +103,6 @@ class Settings(BaseSettings):
                 self.SESSION_BLACKLIST = json.loads(self.SESSION_BLACKLIST)
             except:
                 self.SESSION_BLACKLIST = [int(s.strip()) for s in self.SESSION_BLACKLIST.split(",")]
-        
-        # Parse ALIBABA_AVAILABLE_MODELS if string
-        if isinstance(self.ALIBABA_AVAILABLE_MODELS, str):
-            try:
-                self.ALIBABA_AVAILABLE_MODELS = json.loads(self.ALIBABA_AVAILABLE_MODELS)
-            except:
-                self.ALIBABA_AVAILABLE_MODELS = [s.strip() for s in self.ALIBABA_AVAILABLE_MODELS.split(",")]
 
         if self.INITIAL_DEPOSIT == 0.0 and self.INITIAL_CAPITAL != 10000.0:
             self.INITIAL_DEPOSIT = self.INITIAL_CAPITAL
